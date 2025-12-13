@@ -1,2 +1,2 @@
 # Refine
-Refine ist ein CLI-Tool, das Ziele und Träume in strukturierte Projekte und nächste, konkret gehbare Schritte zerlegt, inklusive Fortschritt und Fokus.
+Refine is a CLI-based tool to break down goals into actionable steps. Work in Progress.
