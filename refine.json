@@ -1,16 +1,3 @@
 {
-    "goals": [
-        {
-            "goal": "clear",
-            "steps": []
-        },
-        {
-            "goal": "Programmieren lernen",
-            "steps": []
-        },
-        {
-            "goal": "Getting engaged to my gf",
-            "steps": []
-        }
-    ]
+    "goals": []
 }
