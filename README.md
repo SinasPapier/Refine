@@ -39,6 +39,21 @@ Supabase-Datenbank**.
    hineinkopieren und **Run** drücken. Damit werden alle Tabellen, Regeln und
    die Nummern-Funktion angelegt.
 
+### 2b. Selbstregistrierung abschalten (wichtig!)
+
+Supabase erlaubt standardmäßig, dass **jede fremde Person sich selbst ein Konto
+anlegt**. Da alle Angemeldeten die Firmendaten sehen, muss das aus sein:
+
+1. **Authentication → Sign In / Providers → Email**
+2. **„Allow new users to sign up" ausschalten** und speichern.
+
+Eure eigenen Konten legt ihr in Schritt 6 manuell an.
+
+> Bei einer bereits laufenden Datenbank, die mit einer älteren Fassung
+> eingerichtet wurde, zusätzlich einmal
+> [`supabase/hardening.sql`](supabase/hardening.sql) im SQL-Editor ausführen.
+> Bei einer Neueinrichtung ist das nicht nötig – `schema.sql` enthält alles.
+
 ### 3. Zugangsdaten kopieren
 
 In Supabase unter **Project Settings → API** findest du:
@@ -96,6 +111,22 @@ Produktions-Build lokal prüfen:
 npm run build
 npm run preview
 ```
+
+## Sicherheit
+
+Die Daten liegen in Supabase und sind über Row Level Security geschützt:
+
+- **Ohne Anmeldung** ist nichts sichtbar und die Nummern-Funktion nicht aufrufbar.
+- **Angemeldete Gesellschafter** sehen alle Daten und verwalten Kunden, Projekte
+  und Zuständigkeiten gemeinsam.
+- **Arbeitszeiten** darf jeder nur für sich selbst buchen, ändern und löschen.
+- **Profile** kann jeder nur für sich selbst ändern.
+- Das **Nummern-Protokoll** ist unveränderlich; die **Zähler** lassen sich nicht
+  von Hand verstellen (nur das Format: Präfix, Jahr, Stellen).
+
+Der `anon public` Key im ausgelieferten JavaScript ist unkritisch und dafür
+vorgesehen – er gewährt ohne gültige Anmeldung keinen Datenzugriff.
+Voraussetzung ist, dass die Selbstregistrierung aus ist (Schritt 2b).
 
 ## Technik
 
