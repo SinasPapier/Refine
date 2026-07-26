@@ -4,6 +4,12 @@
 -- Anleitung: Öffne in Supabase den "SQL Editor", füge dieses komplette Skript
 -- ein und klicke "Run". Es legt alle Tabellen, Regeln und die Nummern-Funktion
 -- an. Das Skript kann gefahrlos erneut ausgeführt werden (IF NOT EXISTS).
+--
+-- WICHTIG – zusätzlich einmal im Dashboard erledigen:
+--   Authentication -> Sign In / Providers -> Email
+--   -> "Allow new users to sign up" AUSSCHALTEN
+-- Sonst kann sich jede fremde Person selbst ein Konto anlegen und damit alle
+-- Daten sehen. Eigene Konten manuell unter Authentication -> Users anlegen.
 -- ============================================================================
 
 -- ---------------------------------------------------------------------------
@@ -120,6 +126,11 @@ declare
   v_zaehler integer;
   v_nummer  text;
 begin
+  -- Ohne angemeldeten Nutzer wird keine Nummer vergeben.
+  if auth.uid() is null then
+    raise exception 'Nicht angemeldet';
+  end if;
+
   -- Zeile des Nummernkreises sperren
   select * into v_kreis from public.nummernkreise where typ = p_typ for update;
   if not found then
@@ -154,6 +165,12 @@ begin
 end;
 $$;
 
+-- Aufrufrecht entziehen und gezielt nur Angemeldeten geben.
+-- (In PostgreSQL darf sonst standardmäßig JEDER Funktionen ausführen.)
+revoke all on function public.next_nummer(text, text) from public;
+revoke all on function public.next_nummer(text, text) from anon;
+grant execute on function public.next_nummer(text, text) to authenticated;
+
 -- ============================================================================
 -- Trigger: legt beim ersten Login automatisch einen profile-Eintrag an
 -- ============================================================================
@@ -187,18 +204,73 @@ alter table public.zustaendigkeiten enable row level security;
 alter table public.nummernkreise    enable row level security;
 alter table public.nummern_log      enable row level security;
 
--- Hilfs-Makro: eine Policy "alles für Angemeldete" pro Tabelle
+-- Gemeinsam genutzte Stammdaten: alle Angemeldeten dürfen alles bearbeiten.
 do $$
 declare
   t text;
 begin
-  foreach t in array array[
-    'profile','kunden','projekte','arbeitszeiten',
-    'zustaendigkeiten','nummernkreise','nummern_log'
-  ] loop
+  foreach t in array array['kunden','projekte','zustaendigkeiten'] loop
     execute format('drop policy if exists "auth_all" on public.%I;', t);
     execute format(
       'create policy "auth_all" on public.%I
          for all to authenticated using (true) with check (true);', t);
   end loop;
 end $$;
+
+-- Alte Policies entfernen, damit dieses Skript erneut ausführbar bleibt.
+drop policy if exists "auth_all"      on public.arbeitszeiten;
+drop policy if exists "zeiten_select" on public.arbeitszeiten;
+drop policy if exists "zeiten_insert" on public.arbeitszeiten;
+drop policy if exists "zeiten_update" on public.arbeitszeiten;
+drop policy if exists "zeiten_delete" on public.arbeitszeiten;
+drop policy if exists "auth_all"       on public.profile;
+drop policy if exists "profile_select" on public.profile;
+drop policy if exists "profile_update" on public.profile;
+drop policy if exists "auth_all"   on public.nummern_log;
+drop policy if exists "log_select" on public.nummern_log;
+drop policy if exists "auth_all"      on public.nummernkreise;
+drop policy if exists "kreise_select" on public.nummernkreise;
+drop policy if exists "kreise_update" on public.nummernkreise;
+
+-- Arbeitszeiten: alle sehen alles, bearbeiten nur die eigenen Einträge.
+create policy "zeiten_select" on public.arbeitszeiten
+  for select to authenticated using (true);
+
+create policy "zeiten_insert" on public.arbeitszeiten
+  for insert to authenticated with check (gesellschafter_id = auth.uid());
+
+create policy "zeiten_update" on public.arbeitszeiten
+  for update to authenticated
+  using (gesellschafter_id = auth.uid())
+  with check (gesellschafter_id = auth.uid());
+
+create policy "zeiten_delete" on public.arbeitszeiten
+  for delete to authenticated using (gesellschafter_id = auth.uid());
+
+-- Profile: für alle sichtbar, änderbar nur das eigene.
+-- Neue Profile legt der Trigger handle_new_user an, daher keine insert-Policy.
+create policy "profile_select" on public.profile
+  for select to authenticated using (true);
+
+create policy "profile_update" on public.profile
+  for update to authenticated
+  using (id = auth.uid())
+  with check (id = auth.uid());
+
+-- Nummern-Protokoll: nur lesen – Einträge entstehen ausschließlich über
+-- next_nummer und bleiben damit unveränderlich (revisionssicher).
+create policy "log_select" on public.nummern_log
+  for select to authenticated using (true);
+
+-- Nummernkreise: Format anpassbar, Zähler unantastbar.
+create policy "kreise_select" on public.nummernkreise
+  for select to authenticated using (true);
+
+create policy "kreise_update" on public.nummernkreise
+  for update to authenticated using (true) with check (true);
+
+-- Spaltengenau: "zaehler" und "jahr" lassen sich nicht von Hand ändern.
+revoke update on public.nummernkreise from authenticated;
+revoke update on public.nummernkreise from anon;
+grant update (praefix, mit_jahr, reset_pro_jahr, stellen)
+  on public.nummernkreise to authenticated;
