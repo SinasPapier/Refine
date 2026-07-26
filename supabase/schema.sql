@@ -4,6 +4,12 @@
 -- Anleitung: Öffne in Supabase den "SQL Editor", füge dieses komplette Skript
 -- ein und klicke "Run". Es legt alle Tabellen, Regeln und die Nummern-Funktion
 -- an. Das Skript kann gefahrlos erneut ausgeführt werden (IF NOT EXISTS).
+--
+-- WICHTIG – zusätzlich einmal im Dashboard erledigen:
+--   Authentication -> Sign In / Providers -> Email
+--   -> "Allow new users to sign up" AUSSCHALTEN
+-- Sonst kann sich jede fremde Person selbst ein Konto anlegen und damit alle
+-- Daten sehen. Eigene Konten manuell unter Authentication -> Users anlegen.
 -- ============================================================================
 
 -- ---------------------------------------------------------------------------
