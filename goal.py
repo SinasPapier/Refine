@@ -27,44 +27,55 @@ def _format_goal_line(i: int, goal: dict) -> str:
 
 def _print_goals_numbered(goals: list[dict]) -> None:
     print("Current Goals:")
-    if not goals:
-        print("- (none)")
-        return
+    _ensure_goals_exists(goals, "There are no current goals.")
+    return
     for i, g in enumerate(goals, start=1):
         print(_format_goal_line(i, g))
 
 
-def _choose_goal(goals: list[dict], prompt: str) -> Optional[dict]:
-    """Let the user choose a goal by number (1..n).
+def _ensure_goals_exists(goals: list[dict], message: str):
+    if not goals: 
+        print(message)
+        return False
+    return True
+    
 
-    UX:
-    - shows a numbered list
-    - user can type a number
-    - user can press Enter (or type 'b') to go back
-
-    Returns the chosen goal dict, or None if cancelled.
-    """
-    if not goals:
-        print("No goals found. Please set a goal first.")
+def _parse_goal_index(raw: str, goal_count: int, invalid_message: str) -> Optional[int]:
+    raw = raw.strip()
+    if not raw.isdigit():
+        print(invalid_message)
         return None
 
-    _print_goals_numbered(goals)
-    print("Options: enter a number (1..n) • Enter = back • b = back")
+    idx = int(raw)
+    if idx < 1 or idx > goal_count:
+        print("Number out of range.")
+        return None
 
+    return idx - 1
+
+
+def _choose_goal(goals: list[dict], prompt: str) -> Optional[dict]:
+    if not _ensure_goals_exists(goals, "No goals found. Please set a goal first."):
+        return None
+    _print_goals_numbered(goals)
+    # If only one goal exists, auto-select it and skip input
+    if len(goals) == 1:
+        print("Only one goal available. Automatically selected.")
+        return goals[0]
+    print(f"Options: Enter a number from 1-{len(goals)} or type 'back' to return")
     raw = input(prompt).strip().lower()
     if raw in ("", "b", "back"):
         return None
 
-    if not raw.isdigit():
-        print("Please enter a number (e.g., 1) or press Enter to go back.")
+    idx = _parse_goal_index(
+        raw,
+        len(goals),
+        "Please enter a number (e.g., 1) or press Enter to go back.",
+    )
+    if idx is None:
         return None
 
-    idx = int(raw)
-    if idx < 1 or idx > len(goals):
-        print("Number out of range.")
-        return None
-
-    return goals[idx - 1]
+    return goals[idx]
 
 
 # ---------------------------
@@ -161,16 +172,11 @@ def view_steps_for_goal(goal_number: str) -> None:
         print("No goals found.")
         return
 
-    if not goal_number.strip().isdigit():
-        print("Please enter a goal number (e.g., 1).")
+    idx = _parse_goal_index(goal_number, len(goals), "Please enter a goal number (e.g., 1).")
+    if idx is None:
         return
 
-    idx = int(goal_number.strip())
-    if idx < 1 or idx > len(goals):
-        print("Number out of range.")
-        return
-
-    entry = goals[idx - 1]
+    entry = goals[idx]
     title = entry.get("goal", "(no-title)")
     steps = entry.get("steps", [])
 
@@ -208,21 +214,16 @@ def delete_goal(goal_number: Optional[str] = None) -> None:
         _print_goals_numbered(goals)
         goal_number = input("Which goal do you want to delete? Enter the goal number (1..n): ").strip()
 
-    if not goal_number or not goal_number.isdigit():
-        print("Cancelled.")
+    idx = _parse_goal_index(goal_number, len(goals), "Cancelled.")
+    if idx is None:
         return
 
-    idx = int(goal_number)
-    if idx < 1 or idx > len(goals):
-        print("Number out of range.")
-        return
-
-    target = goals[idx - 1]
-    print(f"Selected: {_format_goal_line(idx, target)}")
+    target = goals[idx]
+    print(f"Selected: {_format_goal_line(idx + 1, target)}")
     if not confirm_deletion():
         return
 
-    goals.pop(idx - 1)
+    goals.pop(idx)
     data["goals"] = goals
     _save_data(data)
 
