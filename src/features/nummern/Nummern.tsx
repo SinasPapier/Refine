@@ -3,7 +3,7 @@ import { supabase } from '../../lib/supabase'
 import type { Nummernkreis, NummernLog, NummernTyp } from '../../lib/types'
 import { useToast } from '../../components/Toast'
 import { formatZeitstempel } from '../../lib/format'
-import { useProfiles, nameVon } from '../profile/useProfiles'
+import { useProfiles } from '../profile/ProfileProvider'
 
 const LABELS: Record<NummernTyp, string> = {
   kunde: 'Kundennummer',
@@ -35,7 +35,7 @@ async function inZwischenablage(text: string): Promise<boolean> {
 
 export default function Nummern() {
   const toast = useToast()
-  const { profiles } = useProfiles()
+  const { nameVon } = useProfiles()
   const [kreise, setKreise] = useState<Nummernkreis[]>([])
   const [log, setLog] = useState<NummernLog[]>([])
   const [notiz, setNotiz] = useState('')
@@ -152,7 +152,7 @@ export default function Nummern() {
                   </td>
                   <td>{LABELS[eintrag.typ] ?? eintrag.typ}</td>
                   <td>{eintrag.notiz ?? '—'}</td>
-                  <td>{nameVon(profiles, eintrag.erzeugt_von)}</td>
+                  <td>{nameVon(eintrag.erzeugt_von)}</td>
                   <td>{formatZeitstempel(eintrag.erzeugt_am)}</td>
                 </tr>
               ))}
