@@ -513,7 +513,7 @@ function ProjekteDialog({
               <thead>
                 <tr>
                   <th>Projekt</th>
-                  <th>Zeitraum</th>
+                  <th>Angelegt / erledigt</th>
                   <th></th>
                 </tr>
               </thead>
@@ -522,18 +522,18 @@ function ProjekteDialog({
                   <tr key={p.id}>
                     <td className={p.archiviert ? 'muted' : ''}>
                       {p.name}
-                      {p.archiviert && <span className="tag-intern">archiviert</span>}
+                      {p.archiviert && <span className="tag-intern">erledigt</span>}
                     </td>
                     <td className="nowrap">{zeitraum(p.angelegt_am, p.erledigt_am)}</td>
                     <td className="spalte-aktionen">
                       <div className="aktionen">
                         {p.archiviert ? (
                           <button className="btn-ghost small" onClick={() => reaktivieren(p)}>
-                            Reaktivieren
+                            Wieder öffnen
                           </button>
                         ) : (
                           <button className="btn-ghost small" onClick={() => setErledigt(p)}>
-                            Archivieren
+                            ✓ Erledigt
                           </button>
                         )}
                       </div>
@@ -584,10 +584,10 @@ function ProjektArchivDialog({
       .update({ archiviert: true, erledigt_am: datum })
       .eq('id', projekt.id)
     if (error) {
-      toast('Archivieren fehlgeschlagen.', 'fehler')
+      toast('Speichern fehlgeschlagen.', 'fehler')
       return
     }
-    toast('Projekt archiviert.')
+    toast('Projekt als erledigt markiert.')
     onGespeichert()
     onSchliessen()
   }
@@ -595,7 +595,11 @@ function ProjektArchivDialog({
   return (
     <div className="modal-hintergrund" onClick={onSchliessen}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>„{projekt.name}" abschließen</h2>
+        <h2>„{projekt.name}" als erledigt markieren</h2>
+        <p className="muted small">
+          Das Projekt verschwindet aus der Auswahl der Stoppuhr. Gebuchte Zeiten
+          bleiben erhalten und behalten ihre Zuordnung.
+        </p>
         <label>
           Erledigungsdatum
           <input type="date" value={datum} onChange={(e) => setDatum(e.target.value)} />
@@ -610,7 +614,7 @@ function ProjektArchivDialog({
               Abbrechen
             </button>
             <button className="btn-primary" onClick={archivieren}>
-              Archivieren
+              Als erledigt markieren
             </button>
           </div>
         </div>
