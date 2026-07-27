@@ -145,7 +145,8 @@ label {
 }
 
 input,
-select {
+select,
+textarea {
   font: inherit;
   color: var(--text);
   padding: 9px 11px;
@@ -154,8 +155,13 @@ select {
   background: #fff;
   width: 100%;
 }
+textarea {
+  resize: vertical;
+  min-height: 62px;
+}
 input:focus,
-select:focus {
+select:focus,
+textarea:focus {
   outline: none;
   border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12);
@@ -1366,6 +1372,54 @@ th.nowrap {
 .status-chip.in_arbeit { background: #dbeafe; color: #1e40af; }
 .status-chip.erledigt { background: #dcfce7; color: var(--ok); }
 .status-chip.klein { cursor: default; min-width: 70px; font-size: 0.72rem; }
+
+/* ---------- Projektnotizen ----------
+   Der Text steht in der Farbe des Verfassers – gesetzt wird sie im Markup,
+   weil sie aus dem Profil kommt. Hier nur Form und Abstände. */
+.notiz-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.notiz-liste {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+.notiz-liste li {
+  border: 1px solid var(--border);
+  /* Farbe kommt aus dem Profil des Verfassers. */
+  border-left: 4px solid var(--primary);
+  border-radius: 8px;
+  padding: 9px 12px;
+  background: #fff;
+}
+.notiz-kopf {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.notiz-kopf .aktionen { margin-left: auto; }
+.notiz-text {
+  margin: 0;
+  /* Zeilenumbrüche des Verfassers erhalten, ohne HTML zu erlauben. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.notiz-bearbeiten {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
 
 /* Verschachtelter Dialog (Positionen im Projektdialog): den darunter
    liegenden Dialog deutlich abdunkeln, sonst schaut er an den Rändern

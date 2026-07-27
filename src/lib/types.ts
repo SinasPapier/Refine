@@ -58,6 +58,16 @@ export interface Position {
   created_at: string
 }
 
+/** Notiz am Projekt. Wird in der Farbe ihres Verfassers angezeigt. */
+export interface ProjektNotiz {
+  id: string
+  projekt_id: string
+  autor_id: string
+  text: string
+  created_at: string
+  geaendert_am: string | null
+}
+
 export const POSITION_STATUS: Record<PositionStatus, string> = {
   offen: 'offen',
   in_arbeit: 'in Arbeit',
