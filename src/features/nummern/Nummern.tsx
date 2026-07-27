@@ -139,38 +139,163 @@ export default function Nummern() {
         onGespeichert={ladeKreise}
       />
 
-      <h2>Dokumentation</h2>
-      {log.length === 0 ? (
-        <p className="muted">Noch keine Nummern erzeugt.</p>
-      ) : (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Nummer</th>
-                <th>Typ</th>
-                <th>Notiz</th>
-                <th>Erstellt von</th>
-                <th>Zeitpunkt</th>
-              </tr>
-            </thead>
-            <tbody>
-              {log.map((eintrag) => (
-                <tr key={eintrag.id}>
-                  <td>
-                    <code>{eintrag.nummer}</code>
-                  </td>
-                  <td>{LABELS[eintrag.typ] ?? eintrag.typ}</td>
-                  <td>{eintrag.notiz ?? '—'}</td>
-                  <td>{nameVon(eintrag.erzeugt_von)}</td>
-                  <td>{formatZeitstempel(eintrag.erzeugt_am)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <Dokumentation
+        log={log}
+        istAdmin={meinProfil?.ist_admin ?? false}
+        nameVon={nameVon}
+        onGeaendert={ladeLog}
+      />
     </div>
+  )
+}
+
+/** Ab hier wird nur noch angezeigt und gepflegt – erzeugt wird oben. */
+const SICHTBAR = 10
+
+function Dokumentation({
+  log,
+  istAdmin,
+  nameVon,
+  onGeaendert,
+}: {
+  log: NummernLog[]
+  istAdmin: boolean
+  nameVon: (id: string | null) => string
+  onGeaendert: () => void
+}) {
+  const toast = useToast()
+  const [alleZeigen, setAlleZeigen] = useState(false)
+
+  // Nur die neuesten zeigen, damit die Seite nicht endlos wird.
+  const aeltere = Math.max(0, log.length - SICHTBAR)
+  const sichtbar = alleZeigen ? log : log.slice(0, SICHTBAR)
+
+  async function loeschen(eintrag: NummernLog) {
+    if (
+      !confirm(
+        `Eintrag ${eintrag.nummer} aus der Dokumentation löschen?\n\n` +
+          'Die Nummer selbst bleibt vergeben und wird nicht erneut ausgegeben.',
+      )
+    )
+      return
+    const { error } = await supabase.from('nummern_log').delete().eq('id', eintrag.id)
+    if (error) {
+      toast('Löschen fehlgeschlagen.', 'fehler')
+      return
+    }
+    toast(`${eintrag.nummer} aus der Dokumentation entfernt.`)
+    onGeaendert()
+  }
+
+  if (log.length === 0) {
+    return (
+      <>
+        <h2>Dokumentation</h2>
+        <p className="muted">Noch keine Nummern erzeugt.</p>
+      </>
+    )
+  }
+
+  return (
+    <>
+      <h2>Dokumentation</h2>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Nummer</th>
+              <th>Typ</th>
+              <th>Notiz</th>
+              <th>Erstellt von</th>
+              <th>Zeitpunkt</th>
+              {istAdmin && <th></th>}
+            </tr>
+          </thead>
+          <tbody>
+            {sichtbar.map((eintrag) => (
+              <tr key={eintrag.id}>
+                <td className="nowrap">
+                  <code>{eintrag.nummer}</code>
+                </td>
+                <td className="nowrap">{LABELS[eintrag.typ] ?? eintrag.typ}</td>
+                <td>
+                  <NotizFeld eintrag={eintrag} onGespeichert={onGeaendert} />
+                </td>
+                <td className="nowrap">{nameVon(eintrag.erzeugt_von)}</td>
+                <td className="nowrap">{formatZeitstempel(eintrag.erzeugt_am)}</td>
+                {istAdmin && (
+                  <td className="spalte-aktionen">
+                    <div className="aktionen">
+                      <button
+                        className="btn-ghost small danger"
+                        onClick={() => loeschen(eintrag)}
+                        aria-label={`Eintrag ${eintrag.nummer} löschen`}
+                      >
+                        Löschen
+                      </button>
+                    </div>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {aeltere > 0 && (
+        <button className="btn-ghost small" onClick={() => setAlleZeigen((a) => !a)}>
+          {alleZeigen ? 'Ältere ausblenden' : `Ältere anzeigen (${aeltere})`}
+        </button>
+      )}
+    </>
+  )
+}
+
+/**
+ * Die Notiz lässt sich nachtragen. Gespeichert wird beim Verlassen des Feldes
+ * und nur, wenn sich wirklich etwas geändert hat.
+ */
+function NotizFeld({
+  eintrag,
+  onGespeichert,
+}: {
+  eintrag: NummernLog
+  onGespeichert: () => void
+}) {
+  const toast = useToast()
+  const [wert, setWert] = useState(eintrag.notiz ?? '')
+
+  async function sichern() {
+    const neu = wert.trim()
+    if (neu === (eintrag.notiz ?? '')) return
+    const { error } = await supabase
+      .from('nummern_log')
+      .update({ notiz: neu || null })
+      .eq('id', eintrag.id)
+    if (error) {
+      toast('Notiz konnte nicht gespeichert werden.', 'fehler')
+      setWert(eintrag.notiz ?? '')
+      return
+    }
+    toast('Notiz gespeichert.')
+    onGespeichert()
+  }
+
+  return (
+    <input
+      className="notiz-feld"
+      value={wert}
+      placeholder="Notiz ergänzen…"
+      onChange={(e) => setWert(e.target.value)}
+      onBlur={sichern}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') e.currentTarget.blur()
+        if (e.key === 'Escape') {
+          setWert(eintrag.notiz ?? '')
+          e.currentTarget.blur()
+        }
+      }}
+    />
   )
 }
 

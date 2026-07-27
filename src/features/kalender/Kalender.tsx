@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../lib/supabase'
-import type { Arbeitszeit, Termin } from '../../lib/types'
-import { formatDauer } from '../../lib/format'
+import type { Termin } from '../../lib/types'
 import {
   isoDatum,
   monatePlus,
   monatsRaster,
   monatsTitel,
   tagePlus,
-  uhrzeit,
   wochenStart,
   wochenTitel,
   WOCHENTAGE,
@@ -16,27 +14,22 @@ import {
   istWochenende,
   heuteIso,
 } from '../../lib/datum'
-import { useAuth } from '../auth/useAuth'
-import { useProfiles } from '../profile/ProfileProvider'
 import { useStammdaten } from '../stammdaten/StammdatenProvider'
-import ZeitDialog from '../zeiten/ZeitDialog'
 import TerminDialog from './TerminDialog'
 
 type Ansicht = 'monat' | 'woche'
 
+/**
+ * Reiner Deadline-Kalender. Die erfassten Arbeitszeiten stehen bewusst nicht
+ * hier, sondern im Reiter „Arbeitszeiten" – der Kalender beantwortet die Frage
+ * „was steht an?", nicht „wer hat wann gearbeitet?".
+ */
 export default function Kalender() {
-  const { session } = useAuth()
-  const { profiles, nameVon, farbeVon } = useProfiles()
-  const { projektLabel, projektName } = useStammdaten()
+  const { projektLabel, terminSichtbar } = useStammdaten()
 
   const [ansicht, setAnsicht] = useState<Ansicht>('monat')
   const [anker, setAnker] = useState(() => new Date())
-  const [zeiten, setZeiten] = useState<Arbeitszeit[]>([])
-  const [nurPerson, setNurPerson] = useState<string>('')
   const [gewaehlterTag, setGewaehlterTag] = useState<string | null>(null)
-  const [dialog, setDialog] = useState<null | { eintrag: Arbeitszeit | null; datum: string }>(
-    null,
-  )
   const [termine, setTermine] = useState<Termin[]>([])
   const [terminDialog, setTerminDialog] = useState<
     null | { termin: Termin | null; datum: string }
@@ -53,61 +46,35 @@ export default function Kalender() {
   const bisIso = isoDatum(tage[tage.length - 1])
 
   const laden = useCallback(async () => {
-    const [{ data: z }, { data: t }] = await Promise.all([
-      supabase.from('arbeitszeiten').select('*').gte('datum', vonIso).lte('datum', bisIso),
-      supabase
-        .from('termine')
-        .select('*')
-        .gte('datum', vonIso)
-        .lte('datum', bisIso)
-        .order('datum'),
-    ])
-    setZeiten((z as Arbeitszeit[]) ?? [])
-    setTermine((t as Termin[]) ?? [])
+    const { data } = await supabase
+      .from('termine')
+      .select('*')
+      .gte('datum', vonIso)
+      .lte('datum', bisIso)
+      .order('datum')
+    setTermine((data as Termin[]) ?? [])
   }, [vonIso, bisIso])
 
   useEffect(() => {
     laden()
   }, [laden])
 
-  const gefiltert = useMemo(
-    () => (nurPerson ? zeiten.filter((z) => z.gesellschafter_id === nurPerson) : zeiten),
-    [zeiten, nurPerson],
-  )
-
-  /** Einträge je Tag, absteigend nach Dauer für eine ruhige Darstellung. */
-  const proTag = useMemo(() => {
-    const map = new Map<string, Arbeitszeit[]>()
-    for (const z of gefiltert) {
-      const liste = map.get(z.datum) ?? []
-      liste.push(z)
-      map.set(z.datum, liste)
-    }
-    for (const liste of map.values()) {
-      liste.sort((a, b) => {
-        if (a.start_zeit && b.start_zeit) return a.start_zeit.localeCompare(b.start_zeit)
-        return b.dauer_minuten - a.dauer_minuten
-      })
-    }
-    return map
-  }, [gefiltert])
-
-  /** Deadlines je Tag – unabhängig vom Personenfilter, sie gehören dem Team. */
+  /** Deadlines je Tag. Erledigte und entfernte Projekte fallen raus. */
   const termineProTag = useMemo(() => {
     const map = new Map<string, Termin[]>()
     for (const t of termine) {
+      if (!terminSichtbar(t.projekt_id)) continue
       const liste = map.get(t.datum) ?? []
       liste.push(t)
       map.set(t.datum, liste)
     }
     return map
-  }, [termine])
+  }, [termine, terminSichtbar])
 
-  function summeTag(iso: string): number {
-    return (proTag.get(iso) ?? []).reduce((s, z) => s + z.dauer_minuten, 0)
-  }
-
-  const gesamt = gefiltert.reduce((s, z) => s + z.dauer_minuten, 0)
+  const anzahlSichtbar = useMemo(
+    () => [...termineProTag.values()].reduce((s, l) => s + l.length, 0),
+    [termineProTag],
+  )
 
   function blaettern(richtung: -1 | 1) {
     setGewaehlterTag(null)
@@ -119,11 +86,19 @@ export default function Kalender() {
       ? monatsTitel(anker.getFullYear(), anker.getMonth())
       : wochenTitel(wochenStart(anker))
 
-  const tagDetails = gewaehlterTag ? proTag.get(gewaehlterTag) ?? [] : []
+  /** Zusatzklasse für überfällig/erledigt – in beiden Ansichten gleich. */
+  function zustand(t: Termin, iso: string): string {
+    if (t.erledigt) return ' erledigt'
+    return iso < heuteIso() ? ' ueberfaellig' : ''
+  }
 
   return (
     <div>
       <h1>Kalender</h1>
+      <p className="muted">
+        Alle Deadlines des Teams. Erfasste Arbeitszeiten stehen im Reiter
+        „Arbeitszeiten".
+      </p>
 
       <div className="kal-kopf">
         <div className="kal-navigation">
@@ -161,26 +136,6 @@ export default function Kalender() {
         </div>
       </div>
 
-      <div className="kal-legende">
-        <button
-          className={nurPerson === '' ? 'person-chip alle aktiv' : 'person-chip alle'}
-          onClick={() => setNurPerson('')}
-        >
-          Alle
-        </button>
-        {profiles.map((p) => (
-          <button
-            key={p.id}
-            className={nurPerson === p.id ? 'person-chip aktiv' : 'person-chip'}
-            style={{ background: p.farbe || '#4f46e5' }}
-            onClick={() => setNurPerson(nurPerson === p.id ? '' : p.id)}
-          >
-            {nameVon(p.id)}
-          </button>
-        ))}
-        <span className="kal-summe">Summe: {formatDauer(gesamt)}</span>
-      </div>
-
       {ansicht === 'monat' ? (
         <div className="kal-monat">
           {WOCHENTAGE.map((w) => (
@@ -190,7 +145,6 @@ export default function Kalender() {
           ))}
           {tage.map((tag) => {
             const iso = isoDatum(tag)
-            const eintraege = proTag.get(iso) ?? []
             const fremderMonat = tag.getMonth() !== anker.getMonth()
             const klassen = [
               'kal-zelle',
@@ -201,45 +155,43 @@ export default function Kalender() {
             ]
               .filter(Boolean)
               .join(' ')
+            const auswaehlen = () => setGewaehlterTag(gewaehlterTag === iso ? null : iso)
             return (
-              <button
+              // Bewusst ein div statt eines Knopfes: Die Deadlines darin sind
+              // selbst Knöpfe, und ein Knopf im Knopf ist in HTML nicht erlaubt.
+              // Genau daran scheiterte bisher der Klick auf eine Deadline.
+              <div
                 key={iso}
                 className={klassen}
-                onClick={() => setGewaehlterTag(gewaehlterTag === iso ? null : iso)}
+                role="button"
+                tabIndex={0}
+                onClick={auswaehlen}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    auswaehlen()
+                  }
+                }}
               >
                 <div className="kal-zelle-kopf">
                   <span className="kal-tagzahl">{tag.getDate()}</span>
-                  {eintraege.length > 0 && (
-                    <span className="kal-tagsumme">{formatDauer(summeTag(iso))}</span>
-                  )}
                 </div>
                 <div className="kal-eintraege">
                   {(termineProTag.get(iso) ?? []).map((t) => (
-                    <span
+                    <button
                       key={t.id}
-                      className={`kal-deadline${t.erledigt ? ' erledigt' : ''}${
-                        !t.erledigt && iso < heuteIso() ? ' ueberfaellig' : ''
-                      }`}
-                      title={`Deadline: ${t.titel}`}
+                      className={`kal-deadline${zustand(t, iso)}`}
+                      title={`Deadline: ${t.titel} – zum Bearbeiten klicken`}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setTerminDialog({ termin: t, datum: t.datum })
+                      }}
                     >
                       🚩 {t.titel}
-                    </span>
+                    </button>
                   ))}
-                  {eintraege.slice(0, 3).map((z) => (
-                    <span
-                      key={z.id}
-                      className="kal-balken"
-                      style={{ background: farbeVon(z.gesellschafter_id) }}
-                      title={`${nameVon(z.gesellschafter_id)} · ${projektLabel(z.projekt_id)} · ${formatDauer(z.dauer_minuten)}`}
-                    >
-                      {projektName(z.projekt_id)}
-                    </span>
-                  ))}
-                  {eintraege.length > 3 && (
-                    <span className="kal-mehr">+{eintraege.length - 3} weitere</span>
-                  )}
                 </div>
-              </button>
+              </div>
             )
           })}
         </div>
@@ -247,7 +199,7 @@ export default function Kalender() {
         <div className="kal-woche">
           {tage.map((tag) => {
             const iso = isoDatum(tag)
-            const eintraege = proTag.get(iso) ?? []
+            const eintraege = termineProTag.get(iso) ?? []
             return (
               <div
                 key={iso}
@@ -259,55 +211,18 @@ export default function Kalender() {
                   <span>
                     {WOCHENTAGE[(tag.getDay() + 6) % 7]} {tag.getDate()}.
                   </span>
-                  <strong>{eintraege.length ? formatDauer(summeTag(iso)) : '—'}</strong>
+                  <strong>{eintraege.length ? `${eintraege.length} 🚩` : '—'}</strong>
                 </div>
                 <div className="kal-spalte-inhalt">
-                  {(termineProTag.get(iso) ?? []).map((t) => (
+                  {eintraege.map((t) => (
                     <button
                       key={t.id}
-                      className={`kal-deadline-karte${t.erledigt ? ' erledigt' : ''}${
-                        !t.erledigt && iso < heuteIso() ? ' ueberfaellig' : ''
-                      }`}
+                      className={`kal-deadline-karte${zustand(t, iso)}`}
                       onClick={() => setTerminDialog({ termin: t, datum: t.datum })}
                     >
                       🚩 {t.titel}
                     </button>
                   ))}
-                  {eintraege.map((z) => (
-                    <button
-                      key={z.id}
-                      className="kal-karte"
-                      style={{ borderLeftColor: farbeVon(z.gesellschafter_id) }}
-                      onClick={() =>
-                        z.gesellschafter_id === session?.user.id
-                          ? setDialog({ eintrag: z, datum: z.datum })
-                          : undefined
-                      }
-                      title={
-                        z.gesellschafter_id === session?.user.id
-                          ? 'Zum Bearbeiten klicken'
-                          : `Eintrag von ${nameVon(z.gesellschafter_id)}`
-                      }
-                    >
-                      <div className="kal-karte-kopf">
-                        <strong>{formatDauer(z.dauer_minuten)}</strong>
-                        {uhrzeit(z.start_zeit) && (
-                          <span className="muted small">{uhrzeit(z.start_zeit)}</span>
-                        )}
-                      </div>
-                      <div className="kal-karte-projekt">{projektLabel(z.projekt_id)}</div>
-                      {z.beschreibung && (
-                        <div className="kal-karte-text">{z.beschreibung}</div>
-                      )}
-                      <div className="kal-karte-person">{nameVon(z.gesellschafter_id)}</div>
-                    </button>
-                  ))}
-                  <button
-                    className="kal-plus"
-                    onClick={() => setDialog({ eintrag: null, datum: iso })}
-                  >
-                    + Zeit
-                  </button>
                   <button
                     className="kal-plus deadline"
                     onClick={() => setTerminDialog({ termin: null, datum: iso })}
@@ -321,6 +236,10 @@ export default function Kalender() {
         </div>
       )}
 
+      {anzahlSichtbar === 0 && (
+        <p className="muted">In diesem Zeitraum steht keine Deadline an.</p>
+      )}
+
       {gewaehlterTag && (
         <div className="card">
           <div className="tag-detail-kopf">
@@ -332,28 +251,25 @@ export default function Kalender() {
                 year: 'numeric',
               })}
             </h2>
-            <div className="aktionen">
-              <button
-                className="btn-ghost small"
-                onClick={() => setDialog({ eintrag: null, datum: gewaehlterTag })}
-              >
-                + Zeit erfassen
-              </button>
-              <button
-                className="btn-ghost small"
-                onClick={() => setTerminDialog({ termin: null, datum: gewaehlterTag })}
-              >
-                🚩 + Deadline
-              </button>
-            </div>
+            <button
+              className="btn-ghost small"
+              onClick={() => setTerminDialog({ termin: null, datum: gewaehlterTag })}
+            >
+              🚩 + Deadline
+            </button>
           </div>
 
-          {(termineProTag.get(gewaehlterTag) ?? []).length > 0 && (
+          {(termineProTag.get(gewaehlterTag) ?? []).length === 0 ? (
+            <p className="muted">Keine Deadline an diesem Tag.</p>
+          ) : (
             <ul className="tag-liste deadlines">
               {(termineProTag.get(gewaehlterTag) ?? []).map((t) => (
                 <li key={t.id}>
                   <span>🚩</span>
                   <span className={t.erledigt ? 'durchgestrichen' : ''}>{t.titel}</span>
+                  <span className="tag-projekt">
+                    {t.projekt_id ? projektLabel(t.projekt_id) : ''}
+                  </span>
                   <span className="tag-text muted">{t.beschreibung ?? ''}</span>
                   <button
                     className="btn-ghost small"
@@ -365,36 +281,6 @@ export default function Kalender() {
               ))}
             </ul>
           )}
-
-          {tagDetails.length === 0 ? (
-            <p className="muted">Keine Einträge an diesem Tag.</p>
-          ) : (
-            <ul className="tag-liste">
-              {tagDetails.map((z) => {
-                const eigen = z.gesellschafter_id === session?.user.id
-                return (
-                  <li key={z.id}>
-                    <span
-                      className="punkt"
-                      style={{ background: farbeVon(z.gesellschafter_id) }}
-                    />
-                    <span className="tag-person">{nameVon(z.gesellschafter_id)}</span>
-                    <span className="tag-projekt">{projektLabel(z.projekt_id)}</span>
-                    <span className="tag-text muted">{z.beschreibung ?? ''}</span>
-                    <strong>{formatDauer(z.dauer_minuten)}</strong>
-                    {eigen && (
-                      <button
-                        className="btn-ghost small"
-                        onClick={() => setDialog({ eintrag: z, datum: z.datum })}
-                      >
-                        Bearbeiten
-                      </button>
-                    )}
-                  </li>
-                )
-              })}
-            </ul>
-          )}
         </div>
       )}
 
@@ -403,15 +289,6 @@ export default function Kalender() {
           termin={terminDialog.termin}
           vorgabeDatum={terminDialog.datum}
           onSchliessen={() => setTerminDialog(null)}
-          onGespeichert={laden}
-        />
-      )}
-
-      {dialog && (
-        <ZeitDialog
-          eintrag={dialog.eintrag}
-          vorgabeDatum={dialog.datum ?? heuteIso()}
-          onSchliessen={() => setDialog(null)}
           onGespeichert={laden}
         />
       )}
