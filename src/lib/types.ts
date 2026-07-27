@@ -4,7 +4,6 @@ export interface Profile {
   id: string
   name: string
   email: string | null
-  stundensatz: number | null
   farbe: string | null
   status_text: string | null
   status_gesetzt_am: string | null
