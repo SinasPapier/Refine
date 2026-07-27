@@ -53,3 +53,28 @@ export function formatZeitstempel(iso: string): string {
     minute: '2-digit',
   })
 }
+
+/**
+ * Zahlenwert einer Kundennummer, z. B. "K-00006" -> 6.
+ * Nötig, weil eine reine Textsortierung "K-00010" vor "K-00006" einordnen
+ * würde. Ohne Nummer wird -1 zurückgegeben, damit solche Kunden hinten stehen.
+ */
+export function kundennummerWert(nummer: string | null): number {
+  if (!nummer) return -1
+  const ziffern = nummer.replace(/\D/g, '')
+  if (!ziffern) return -1
+  return parseInt(ziffern, 10)
+}
+
+/**
+ * Vergleichsform eines Firmennamens: Kleinschreibung, ohne Rechtsform und
+ * ohne Satzzeichen. So gilt "Dauth Dienstleistungen e. K." als derselbe
+ * Kunde wie "dauth dienstleistungen".
+ */
+export function nameSchluessel(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\b(gmbh|ag|kg|ohg|gbr|ug|mbh|e\.?\s?k\.?|e\.?\s?v\.?|co|ltd|inc)\b/g, '')
+    .replace(/[^a-zäöüß0-9]/g, '')
+    .trim()
+}

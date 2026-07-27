@@ -30,8 +30,10 @@ function stoppuhrAnzeige(sekunden: number): string {
 export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
   const { session } = useAuth()
   const {
-    aktiveProjekte,
+    aktiveKunden,
+    projekteVonKunde,
     projektLabel,
+    kundeVonProjekt,
     saetze,
     satzVon,
     bezeichnungVon,
@@ -44,9 +46,9 @@ export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
   const [jetzt, setJetzt] = useState(() => Date.now())
 
   // Eingaben für den Start
+  const [kundeId, setKundeId] = useState('')
   const [projektId, setProjektId] = useState('')
   const [taetigkeit, setTaetigkeit] = useState('')
-  const [beschreibung, setBeschreibung] = useState('')
 
   // Stopp-Dialog
   const [dialog, setDialog] = useState<null | {
@@ -55,6 +57,7 @@ export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
     ende: string
   }>(null)
   const [dialogDauer, setDialogDauer] = useState('')
+  const [dialogKunde, setDialogKunde] = useState('')
   const [dialogProjekt, setDialogProjekt] = useState('')
   const [dialogTaetigkeit, setDialogTaetigkeit] = useState('')
   const [dialogText, setDialogText] = useState('')
@@ -91,7 +94,7 @@ export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
     return () => {
       if (tickRef.current) window.clearInterval(tickRef.current)
     }
-  }, [laufend])
+  }, [laufend, kundeVonProjekt])
 
   // Kommt der Rechner aus dem Ruhezustand, kann die Uhr veraltet sein.
   useEffect(() => {
@@ -103,9 +106,16 @@ export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
   }, [laden])
 
   /**
-   * Projektwechsel: Bei einem internen Kunden ist "Internes" der sinnvolle
-   * Vorschlag. Eine bewusst abweichende Auswahl bleibt möglich.
+   * Kundenwechsel: Die Projektwahl passt nicht mehr und wird zurückgesetzt.
+   * Bei einem internen Kunden ist "Internes" der sinnvolle Vorschlag; eine
+   * bewusst abweichende Auswahl bleibt möglich.
    */
+  function kundeGewaehlt(neu: string) {
+    setKundeId(neu)
+    setProjektId('')
+    if (aktiveKunden.find((k) => k.id === neu)?.intern) setTaetigkeit('intern')
+  }
+
   function projektGewaehlt(neu: string, setzeTaetigkeit: (t: string) => void) {
     if (istInternesProjekt(neu)) setzeTaetigkeit('intern')
   }
@@ -116,13 +126,11 @@ export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
       gesellschafter_id: uid,
       projekt_id: projektId || null,
       taetigkeit: taetigkeit || null,
-      beschreibung: beschreibung.trim() || null,
     })
     if (error) {
       toast('Die Uhr konnte nicht gestartet werden.', 'fehler')
       return
     }
-    setBeschreibung('')
     laden()
   }
 
@@ -133,10 +141,11 @@ export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
     const minuten = Math.max(1, Math.round((ende.getTime() - start.getTime()) / 60000))
     setDialog({ minuten, start: laufend.gestartet_am, ende: ende.toISOString() })
     setDialogDauer(`${Math.floor(minuten / 60)}:${String(minuten % 60).padStart(2, '0')}`)
+    setDialogKunde(kundeVonProjekt(laufend.projekt_id)?.id ?? '')
     setDialogProjekt(laufend.projekt_id ?? '')
     setDialogTaetigkeit(laufend.taetigkeit ?? '')
     setDialogText(laufend.beschreibung ?? '')
-  }, [laufend])
+  }, [laufend, kundeVonProjekt])
 
   // Läuft die Uhr beim Öffnen schon ungewöhnlich lange, wurde vermutlich das
   // Stoppen vergessen. Dann einmal von selbst nachfragen.
@@ -198,6 +207,7 @@ export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
     ? Math.max(0, Math.floor((jetzt - new Date(laufend.gestartet_am).getTime()) / 1000))
     : 0
   const laeuftLange = sekunden / 60 > WARNGRENZE_MINUTEN
+  const projekteDesKunden = kundeId ? projekteVonKunde(kundeId) : []
 
   // Über Mitternacht wird auf den Starttag gebucht – das ist gewollt, aber
   // sonst nicht ersichtlich.
@@ -238,17 +248,38 @@ export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
         ) : (
           <>
             <select
+              className="timer-kunde"
+              value={kundeId}
+              onChange={(e) => kundeGewaehlt(e.target.value)}
+              title="Kunde"
+            >
+              <option value="">— Kunde wählen —</option>
+              {aktiveKunden.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.name}
+                </option>
+              ))}
+            </select>
+            <select
               className="timer-projekt"
               value={projektId}
               onChange={(e) => {
                 setProjektId(e.target.value)
                 projektGewaehlt(e.target.value, setTaetigkeit)
               }}
+              disabled={!kundeId}
+              title={kundeId ? 'Projekt' : 'Zuerst einen Kunden wählen'}
             >
-              <option value="">— ohne Projekt —</option>
-              {aktiveProjekte.map((p) => (
+              <option value="">
+                {!kundeId
+                  ? '— Projekt —'
+                  : projekteDesKunden.length === 0
+                    ? '— keine Projekte —'
+                    : '— Projekt wählen —'}
+              </option>
+              {projekteDesKunden.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {projektLabel(p.id)}
+                  {p.name}
                 </option>
               ))}
             </select>
@@ -265,15 +296,15 @@ export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
                 </option>
               ))}
             </select>
-            <input
-              className="timer-text"
-              value={beschreibung}
-              onChange={(e) => setBeschreibung(e.target.value)}
-              placeholder="Woran arbeitest du? (optional)"
-            />
             <button className="btn-start" onClick={starten}>
               ▶ Starten
             </button>
+            {kundeId && projekteDesKunden.length === 0 && (
+              <span className="timer-hinweis">
+                Für diesen Kunden gibt es noch kein Projekt – unter „Kunden &amp;
+                Projekte" anlegen.
+              </span>
+            )}
           </>
         )}
       </div>
@@ -309,6 +340,27 @@ export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
             </label>
 
             <label>
+              Kunde
+              <select
+                value={dialogKunde}
+                onChange={(e) => {
+                  setDialogKunde(e.target.value)
+                  setDialogProjekt('')
+                  if (aktiveKunden.find((k) => k.id === e.target.value)?.intern) {
+                    setDialogTaetigkeit('intern')
+                  }
+                }}
+              >
+                <option value="">— ohne Kunde —</option>
+                {aktiveKunden.map((k) => (
+                  <option key={k.id} value={k.id}>
+                    {k.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
               Projekt
               <select
                 value={dialogProjekt}
@@ -316,11 +368,12 @@ export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
                   setDialogProjekt(e.target.value)
                   projektGewaehlt(e.target.value, setDialogTaetigkeit)
                 }}
+                disabled={!dialogKunde}
               >
                 <option value="">— ohne Projekt —</option>
-                {aktiveProjekte.map((p) => (
+                {(dialogKunde ? projekteVonKunde(dialogKunde) : []).map((p) => (
                   <option key={p.id} value={p.id}>
-                    {projektLabel(p.id)}
+                    {p.name}
                   </option>
                 ))}
               </select>

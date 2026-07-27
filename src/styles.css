@@ -1251,3 +1251,77 @@ th.nowrap {
   border-radius: 8px;
   font-size: 0.9rem;
 }
+
+/* Kaskade Kunde -> Projekt -> Tätigkeit in der Stoppuhr-Leiste */
+.timer-kunde { max-width: 220px; }
+.timer-hinweis {
+  flex-basis: 100%;
+  font-size: 0.82rem;
+  color: #92400e;
+}
+
+/* ========================================================================
+   Suche, Dubletten, Positionen
+   ======================================================================== */
+.such-zeile {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 14px 0 6px;
+}
+.suchfeld { max-width: 420px; }
+.dubletten-liste {
+  list-style: none;
+  margin: 6px 0;
+  padding: 0;
+}
+.dubletten-liste li { padding: 3px 0; font-weight: 600; }
+.hinweis-warnung.wide { grid-column: 1 / -1; }
+
+.projekt-form {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.projekt-form > input[type='text'],
+.projekt-form > input:not([type]) { flex: 1; min-width: 180px; }
+.projekt-form input[type='date'] { width: auto; }
+.projekt-form .checkbox-inline { white-space: nowrap; }
+
+.positionen-liste { list-style: none; margin: 0 0 6px; padding: 0; }
+.positionen-liste li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.positionen-liste li.fertig .positions-name {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+.positions-name { flex: 1; overflow-wrap: anywhere; }
+.status-chip {
+  border: none;
+  border-radius: 999px;
+  padding: 3px 11px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  min-width: 78px;
+  text-align: center;
+}
+.status-chip.offen { background: #fef9c3; color: #a16207; }
+.status-chip.in_arbeit { background: #dbeafe; color: #1e40af; }
+.status-chip.erledigt { background: #dcfce7; color: var(--ok); }
+.status-chip.klein { cursor: default; min-width: 70px; font-size: 0.72rem; }
+
+/* Verschachtelter Dialog (Positionen im Projektdialog): den darunter
+   liegenden Dialog deutlich abdunkeln, sonst schaut er an den Rändern
+   hervor und wirkt wie ein Darstellungsfehler. */
+.modal .modal-hintergrund {
+  background: rgba(15, 23, 42, 0.62);
+  z-index: 70;
+}

@@ -58,6 +58,26 @@ create table if not exists public.projekte (
   beschreibung text,
   status       text not null default 'aktiv',
   archiviert   boolean not null default false,
+  -- Leistungszeitraum des Auftrags.
+  angelegt_am  date not null default current_date,
+  erledigt_am  date,
+  -- Laufende Nummer je Kunde. Bewusst nur die Zahl: die Anzeige "K-00002-01"
+  -- entsteht aus der AKTUELLEN Kundennummer, damit eine spätere Korrektur der
+  -- Kundennummer nicht zu veralteten Projektnummern führt.
+  lfd_nummer   integer,
+  created_at   timestamptz not null default now()
+);
+
+-- Bestandteile eines Projekts, z. B. Visitenkarten, Beachflag, Flyer.
+-- Das Projekt bleibt die Abrechnungseinheit; die Positionen zeigen, was noch
+-- offen ist.
+create table if not exists public.positionen (
+  id           uuid primary key default gen_random_uuid(),
+  projekt_id   uuid not null references public.projekte (id) on delete cascade,
+  bezeichnung  text not null,
+  status       text not null default 'offen',  -- offen | in_arbeit | erledigt
+  sortierung   integer not null default 0,
+  erledigt_am  date,
   created_at   timestamptz not null default now()
 );
 
@@ -148,6 +168,31 @@ alter table public.arbeitszeiten  add column if not exists end_zeit          tim
 alter table public.arbeitszeiten  add column if not exists taetigkeit        text;
 alter table public.arbeitszeiten  add column if not exists stundensatz       numeric;
 alter table public.laufende_zeiten add column if not exists taetigkeit       text;
+
+-- Leistungszeitraum am Projekt nachrüsten: Bestandsdaten bekommen ihr
+-- Anlagedatum aus dem technischen Anlagezeitpunkt, damit nichts leer bleibt.
+alter table public.projekte add column if not exists angelegt_am date;
+alter table public.projekte add column if not exists erledigt_am date;
+alter table public.projekte add column if not exists lfd_nummer  integer;
+update public.projekte set angelegt_am = created_at::date where angelegt_am is null;
+alter table public.projekte alter column angelegt_am set default current_date;
+alter table public.projekte alter column angelegt_am set not null;
+
+-- Am Kunden wieder entfernt: für die Dokumentation zählt der Zeitraum des
+-- Auftrags, nicht der der Kundenbeziehung.
+alter table public.kunden drop column if exists angelegt_am;
+alter table public.kunden drop column if exists erledigt_am;
+
+-- Bestandsprojekte bekommen ihre laufende Nummer nach Anlagereihenfolge.
+with nummeriert as (
+  select id, row_number() over (partition by kunde_id order by created_at, id) as nr
+    from public.projekte
+   where lfd_nummer is null
+)
+update public.projekte p
+   set lfd_nummer = n.nr
+  from nummeriert n
+ where p.id = n.id;
 
 -- Nicht mehr benötigt: Sätze hängen an der Tätigkeit, nicht am Kunden bzw.
 -- an der Person.
@@ -259,6 +304,36 @@ revoke all on function public.next_nummer(text, text) from public;
 revoke all on function public.next_nummer(text, text) from anon;
 grant execute on function public.next_nummer(text, text) to authenticated;
 
+-- Nächste laufende Projektnummer eines Kunden. Die Kundenzeile wird gesperrt,
+-- sonst könnten zwei gleichzeitig angelegte Projekte dieselbe Nummer bekommen.
+create or replace function public.next_projektnummer(p_kunde_id uuid)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_naechste integer;
+begin
+  if auth.uid() is null then
+    raise exception 'Nicht angemeldet';
+  end if;
+
+  perform 1 from public.kunden where id = p_kunde_id for update;
+
+  select coalesce(max(lfd_nummer), 0) + 1
+    into v_naechste
+    from public.projekte
+   where kunde_id = p_kunde_id;
+
+  return v_naechste;
+end;
+$$;
+
+revoke all on function public.next_projektnummer(uuid) from public;
+revoke all on function public.next_projektnummer(uuid) from anon;
+grant execute on function public.next_projektnummer(uuid) to authenticated;
+
 -- Administrator? Wird in den Sicherheitsregeln verwendet. "security definer",
 -- weil die Regeln sonst wieder auf profile zugreifen müssten.
 create or replace function public.ist_admin()
@@ -297,6 +372,35 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 
+-- Das Anlagedatum ist Teil des dokumentierten Leistungszeitraums und soll
+-- nicht beiläufig verändert werden. Spaltenrechte scheiden aus, weil die Rolle
+-- "authenticated" auch Administratoren umfasst – ein Trigger kann dagegen
+-- ist_admin() auswerten.
+create or replace function public.schuetze_angelegt_am()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.angelegt_am is distinct from old.angelegt_am
+     -- auth.uid() ist null bei direktem Zugriff über den SQL-Editor; dort soll
+     -- eine Korrektur im Notfall weiterhin möglich sein.
+     and auth.uid() is not null
+     and not public.ist_admin() then
+    raise exception 'Das Anlagedatum darf nur ein Administrator ändern';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists schuetze_angelegt_am_kunden on public.kunden;
+
+drop trigger if exists schuetze_angelegt_am_projekte on public.projekte;
+create trigger schuetze_angelegt_am_projekte
+  before update on public.projekte
+  for each row execute function public.schuetze_angelegt_am();
+
 
 -- ############################################################################
 -- 5) SICHERHEIT (Row Level Security)
@@ -314,6 +418,7 @@ alter table public.stundensaetze   enable row level security;
 alter table public.termine         enable row level security;
 alter table public.nummernkreise   enable row level security;
 alter table public.nummern_log     enable row level security;
+alter table public.positionen      enable row level security;
 
 -- Alte Regeln entfernen, damit dieses Skript wiederholt ausführbar bleibt.
 do $$
@@ -338,6 +443,11 @@ create policy "auth_all" on public.projekte
 create policy "termine_all" on public.termine
   for all to authenticated using (true) with check (true);
 grant select, insert, update, delete on public.termine to authenticated;
+
+-- Positionen gehören zum Projekt und werden gemeinsam gepflegt.
+create policy "positionen_all" on public.positionen
+  for all to authenticated using (true) with check (true);
+grant select, insert, update, delete on public.positionen to authenticated;
 
 -- Arbeitszeiten: alle sehen alles, bearbeiten nur die eigenen Einträge.
 create policy "zeiten_select" on public.arbeitszeiten

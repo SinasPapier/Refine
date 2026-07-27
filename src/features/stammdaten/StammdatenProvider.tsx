@@ -9,6 +9,7 @@ import {
 } from 'react'
 import { supabase } from '../../lib/supabase'
 import type { Kunde, Projekt, Stundensatz } from '../../lib/types'
+import { kundennummerWert } from '../../lib/format'
 import { useAuth } from '../auth/useAuth'
 
 interface StammdatenState {
@@ -31,6 +32,8 @@ interface StammdatenState {
   bezeichnungVon: (schluessel: string | null) => string
   /** Gehört das Projekt zu einem internen Kunden? */
   istInternesProjekt: (projektId: string | null) => boolean
+  /** Nicht archivierte Projekte eines Kunden – für die Auswahl-Kaskade. */
+  projekteVonKunde: (kundeId: string) => Projekt[]
 }
 
 const leer: StammdatenState = {
@@ -47,6 +50,7 @@ const leer: StammdatenState = {
   satzVon: () => null,
   bezeichnungVon: () => '—',
   istInternesProjekt: () => false,
+  projekteVonKunde: () => [],
 }
 
 const StammdatenContext = createContext<StammdatenState>(leer)
@@ -64,11 +68,19 @@ export function StammdatenProvider({ children }: { children: ReactNode }) {
 
   const neuLaden = useCallback(async () => {
     const [{ data: k }, { data: p }, { data: s }] = await Promise.all([
-      supabase.from('kunden').select('*').order('name'),
+      supabase.from('kunden').select('*'),
       supabase.from('projekte').select('*').order('name'),
       supabase.from('stundensaetze').select('*').order('sortierung'),
     ])
-    setKunden((k as Kunde[]) ?? [])
+    // Absteigend nach Kundennummer: die zuletzt angelegten stehen oben.
+    // Ohne Nummer ans Ende, dort alphabetisch.
+    const kundenListe = ((k as Kunde[]) ?? []).slice().sort((a, b) => {
+      const wa = kundennummerWert(a.kundennummer)
+      const wb = kundennummerWert(b.kundennummer)
+      if (wa !== wb) return wb - wa
+      return a.name.localeCompare(b.name)
+    })
+    setKunden(kundenListe)
     setProjekte((p as Projekt[]) ?? [])
     setSaetze((s as Stundensatz[]) ?? [])
     setLaden(false)
@@ -125,6 +137,9 @@ export function StammdatenProvider({ children }: { children: ReactNode }) {
     const istInternesProjekt = (projektId: string | null) =>
       kundeVonProjekt(projektId)?.intern ?? false
 
+    const projekteVonKunde = (kundeId: string) =>
+      projekte.filter((p) => p.kunde_id === kundeId && !p.archiviert)
+
     return {
       kunden,
       projekte,
@@ -139,6 +154,7 @@ export function StammdatenProvider({ children }: { children: ReactNode }) {
       satzVon,
       bezeichnungVon,
       istInternesProjekt,
+      projekteVonKunde,
     }
   }, [kunden, projekte, saetze, laden, neuLaden])
 

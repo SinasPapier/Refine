@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../lib/supabase'
-import type { Arbeitszeit, LaufendeZeit, Termin } from '../../lib/types'
+import type { Arbeitszeit, LaufendeZeit, Position, Termin } from '../../lib/types'
+import { POSITION_STATUS } from '../../lib/types'
 import { formatDauer } from '../../lib/format'
 import { formatDatum } from '../../lib/format'
 import { heuteIso, isoDatum } from '../../lib/datum'
@@ -11,10 +12,11 @@ type Zeitraum = 'monat' | 'jahr' | 'alle'
 
 export default function Dashboard() {
   const { profiles, nameVon, farbeVon } = useProfiles()
-  const { kunden, kundeVonProjekt, projektLabel } = useStammdaten()
+  const { kunden, kundeVonProjekt, projektLabel, projekte } = useStammdaten()
   const [zeiten, setZeiten] = useState<Arbeitszeit[]>([])
   const [laufende, setLaufende] = useState<LaufendeZeit[]>([])
   const [termine, setTermine] = useState<Termin[]>([])
+  const [positionen, setPositionen] = useState<Position[]>([])
   const [zeitraum, setZeitraum] = useState<Zeitraum>('monat')
 
   useEffect(() => {
@@ -29,10 +31,13 @@ export default function Dashboard() {
         .gte('datum', heuteIso())
         .order('datum')
         .limit(5),
-    ]).then(([z, l, t]) => {
+      // Was steht noch an? Offene Positionen laufender Projekte.
+      supabase.from('positionen').select('*').neq('status', 'erledigt'),
+    ]).then(([z, l, t, pos]) => {
       setZeiten((z.data as Arbeitszeit[]) ?? [])
       setLaufende((l.data as LaufendeZeit[]) ?? [])
       setTermine((t.data as Termin[]) ?? [])
+      setPositionen((pos.data as Position[]) ?? [])
     })
   }, [])
 
@@ -108,7 +113,7 @@ export default function Dashboard() {
           <div className="kpi-value">{gefiltert.length}</div>
         </div>
         <div className="kpi">
-          <div className="kpi-label">Kunden</div>
+          <div className="kpi-label">Kunden (aktiv)</div>
           <div className="kpi-value">{kunden.filter((k) => !k.archiviert).length}</div>
         </div>
         <div className="kpi">
@@ -130,6 +135,29 @@ export default function Dashboard() {
                 </span>
               </li>
             ))}
+          </ul>
+        </div>
+      )}
+
+      {positionen.length > 0 && (
+        <div className="card">
+          <h2>Was ist noch offen</h2>
+          <ul className="deadline-liste">
+            {positionen
+              .filter((pos) => {
+                const proj = projekte.find((p) => p.id === pos.projekt_id)
+                return proj && !proj.archiviert
+              })
+              .slice(0, 8)
+              .map((pos) => (
+                <li key={pos.id}>
+                  <span className={`status-chip ${pos.status} klein`}>
+                    {POSITION_STATUS[pos.status]}
+                  </span>
+                  <span className="deadline-titel">{pos.bezeichnung}</span>
+                  <span className="muted small">{projektLabel(pos.projekt_id)}</span>
+                </li>
+              ))}
           </ul>
         </div>
       )}

@@ -1,9 +1,11 @@
 name: Deploy auf GitHub Pages
 
+# Nur von main aus veröffentlichen. Auf Arbeitsbranches lief der Bau zwar
+# durch, der Deploy-Schritt wurde aber von den Schutzregeln der Pages-Umgebung
+# abgelehnt – das erzeugte bei jedem Push eine Fehlermail.
 on:
   push:
     branches:
-      - claude/arbeitszeiten-zustaendigkeiten-app-axjviy
       - main
   workflow_dispatch:
 
@@ -24,7 +26,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - run: npm ci
