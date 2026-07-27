@@ -23,12 +23,14 @@ export default function Profil({
 
   const [name, setName] = useState('')
   const [farbe, setFarbe] = useState<string>(STANDARD_FARBE)
+  const [status, setStatus] = useState('')
   const [speichert, setSpeichert] = useState(false)
 
   useEffect(() => {
     if (!meinProfil) return
     setName((meinProfil.name ?? '').trim())
     setFarbe(meinProfil.farbe || STANDARD_FARBE)
+    setStatus(meinProfil.status_text ?? '')
   }, [meinProfil])
 
   async function speichern(e: FormEvent) {
@@ -40,9 +42,21 @@ export default function Profil({
       return
     }
     setSpeichert(true)
+    // Bei der Begrüßung gibt es noch kein Statusfeld – dann unverändert lassen.
+    const statusFelder = begruessung
+      ? {}
+      : {
+          status_text: status.trim() || null,
+          status_gesetzt_am:
+            status.trim() && status.trim() !== (meinProfil?.status_text ?? '')
+              ? new Date().toISOString()
+              : status.trim()
+                ? meinProfil?.status_gesetzt_am ?? new Date().toISOString()
+                : null,
+        }
     const { error } = await supabase
       .from('profile')
-      .update({ name: sauber, farbe })
+      .update({ name: sauber, farbe, ...statusFelder })
       .eq('id', session.user.id)
     setSpeichert(false)
     if (error) {
@@ -96,6 +110,18 @@ export default function Profil({
           ))}
         </div>
       </div>
+
+      {!begruessung && (
+        <label>
+          Status (optional) – für alle im Team sichtbar
+          <input
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            placeholder="z. B. bis 14 Uhr beim Kunden"
+            maxLength={80}
+          />
+        </label>
+      )}
 
       <div className="profil-vorschau">
         Vorschau:{' '}
