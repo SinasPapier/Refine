@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react'
 import { supabase } from '../../lib/supabase'
-import type { Kunde, Projekt } from '../../lib/types'
+import type { Kunde, Projekt, Stundensatz } from '../../lib/types'
 import { useAuth } from '../auth/useAuth'
 
 interface StammdatenState {
@@ -24,6 +24,13 @@ interface StammdatenState {
   /** Nur der Projektname – für enge Stellen wie die Monatsansicht. */
   projektName: (projektId: string | null) => string
   kundeVonProjekt: (projektId: string | null) => Kunde | null
+  /** Die drei einheitlichen Stundensätze, nach Sortierung. */
+  saetze: Stundensatz[]
+  /** Satz zu einem Schlüssel, z. B. "beratung" -> 80. */
+  satzVon: (schluessel: string | null) => number | null
+  bezeichnungVon: (schluessel: string | null) => string
+  /** Gehört das Projekt zu einem internen Kunden? */
+  istInternesProjekt: (projektId: string | null) => boolean
 }
 
 const leer: StammdatenState = {
@@ -36,6 +43,10 @@ const leer: StammdatenState = {
   projektLabel: () => '—',
   projektName: () => '—',
   kundeVonProjekt: () => null,
+  saetze: [],
+  satzVon: () => null,
+  bezeichnungVon: () => '—',
+  istInternesProjekt: () => false,
 }
 
 const StammdatenContext = createContext<StammdatenState>(leer)
@@ -48,15 +59,18 @@ export function StammdatenProvider({ children }: { children: ReactNode }) {
   const { session } = useAuth()
   const [kunden, setKunden] = useState<Kunde[]>([])
   const [projekte, setProjekte] = useState<Projekt[]>([])
+  const [saetze, setSaetze] = useState<Stundensatz[]>([])
   const [laden, setLaden] = useState(true)
 
   const neuLaden = useCallback(async () => {
-    const [{ data: k }, { data: p }] = await Promise.all([
+    const [{ data: k }, { data: p }, { data: s }] = await Promise.all([
       supabase.from('kunden').select('*').order('name'),
       supabase.from('projekte').select('*').order('name'),
+      supabase.from('stundensaetze').select('*').order('sortierung'),
     ])
     setKunden((k as Kunde[]) ?? [])
     setProjekte((p as Projekt[]) ?? [])
+    setSaetze((s as Stundensatz[]) ?? [])
     setLaden(false)
   }, [])
 
@@ -64,6 +78,7 @@ export function StammdatenProvider({ children }: { children: ReactNode }) {
     if (!session) {
       setKunden([])
       setProjekte([])
+      setSaetze([])
       setLaden(false)
       return
     }
@@ -97,6 +112,19 @@ export function StammdatenProvider({ children }: { children: ReactNode }) {
       (p) => !p.archiviert && aktiveKunden.some((k) => k.id === p.kunde_id),
     )
 
+    const satzVon = (schluessel: string | null) => {
+      if (!schluessel) return null
+      return saetze.find((s) => s.schluessel === schluessel)?.satz ?? null
+    }
+
+    const bezeichnungVon = (schluessel: string | null) => {
+      if (!schluessel) return 'nicht zugeordnet'
+      return saetze.find((s) => s.schluessel === schluessel)?.bezeichnung ?? schluessel
+    }
+
+    const istInternesProjekt = (projektId: string | null) =>
+      kundeVonProjekt(projektId)?.intern ?? false
+
     return {
       kunden,
       projekte,
@@ -107,8 +135,12 @@ export function StammdatenProvider({ children }: { children: ReactNode }) {
       projektLabel,
       projektName,
       kundeVonProjekt,
+      saetze,
+      satzVon,
+      bezeichnungVon,
+      istInternesProjekt,
     }
-  }, [kunden, projekte, laden, neuLaden])
+  }, [kunden, projekte, saetze, laden, neuLaden])
 
   return (
     <StammdatenContext.Provider value={wert}>{children}</StammdatenContext.Provider>

@@ -17,8 +17,9 @@ export default function Kunden() {
   const [ansprech, setAnsprech] = useState('')
   const [email, setEmail] = useState('')
   const [telefon, setTelefon] = useState('')
-  const [satz, setSatz] = useState('')
+  const [intern, setIntern] = useState(false)
   const [mitNummer, setMitNummer] = useState(true)
+  const [nummerManuell, setNummerManuell] = useState('')
 
   const sichtbar = kunden.filter((k) => k.archiviert === zeigeArchiv)
 
@@ -26,7 +27,8 @@ export default function Kunden() {
     e.preventDefault()
     if (!name.trim()) return
 
-    let kundennummer: string | null = null
+    // Bestehende Kunden bringen ihre Nummer mit; neue bekommen eine erzeugt.
+    let kundennummer: string | null = nummerManuell.trim() || null
     if (mitNummer) {
       const { data, error } = await supabase.rpc('next_nummer', {
         p_typ: 'kunde',
@@ -40,7 +42,7 @@ export default function Kunden() {
       ansprechpartner: ansprech.trim() || null,
       email: email.trim() || null,
       telefon: telefon.trim() || null,
-      stundensatz: satz.trim() ? Number(satz.replace(',', '.')) : null,
+      intern,
       kundennummer,
     })
     if (error) {
@@ -52,7 +54,8 @@ export default function Kunden() {
     setAnsprech('')
     setEmail('')
     setTelefon('')
-    setSatz('')
+    setNummerManuell('')
+    setIntern(false)
     neuLaden()
   }
 
@@ -94,14 +97,13 @@ export default function Kunden() {
               Telefon
               <input value={telefon} onChange={(e) => setTelefon(e.target.value)} />
             </label>
-            <label>
-              Stundensatz in € (optional)
+            <label className="checkbox-inline">
               <input
-                value={satz}
-                onChange={(e) => setSatz(e.target.value)}
-                placeholder="z. B. 95"
-                inputMode="decimal"
+                type="checkbox"
+                checked={intern}
+                onChange={(e) => setIntern(e.target.checked)}
               />
+              Interner Kunde (Tätigkeit wird auf „Internes" vorbelegt)
             </label>
             <label className="checkbox-inline">
               <input
@@ -111,6 +113,16 @@ export default function Kunden() {
               />
               Kundennummer automatisch vergeben
             </label>
+            {!mitNummer && (
+              <label>
+                Kundennummer (bestehende eintragen)
+                <input
+                  value={nummerManuell}
+                  onChange={(e) => setNummerManuell(e.target.value)}
+                  placeholder="z. B. K-0007"
+                />
+              </label>
+            )}
             <div className="form-actions">
               <button className="btn-primary" type="submit">
                 Kunde anlegen
@@ -142,7 +154,7 @@ export default function Kunden() {
                 <th>Name</th>
                 <th>Ansprechpartner</th>
                 <th>Kontakt</th>
-                <th>Satz</th>
+                <th>Art</th>
                 <th>Projekte</th>
                 <th></th>
               </tr>
@@ -161,7 +173,7 @@ export default function Kunden() {
                     {k.telefon ?? ''}
                     {!k.email && !k.telefon ? '—' : ''}
                   </td>
-                  <td>{k.stundensatz != null ? `${k.stundensatz} €` : '—'}</td>
+                  <td>{k.intern ? 'intern' : 'Kunde'}</td>
                   <td>
                     <button
                       className="btn-ghost small"
@@ -220,7 +232,17 @@ function KundeDialog({
   const [ansprech, setAnsprech] = useState(kunde.ansprechpartner ?? '')
   const [email, setEmail] = useState(kunde.email ?? '')
   const [telefon, setTelefon] = useState(kunde.telefon ?? '')
-  const [satz, setSatz] = useState(kunde.stundensatz != null ? String(kunde.stundensatz) : '')
+  const [nummer, setNummer] = useState(kunde.kundennummer ?? '')
+  const [intern, setIntern] = useState(kunde.intern)
+
+  // Speichern erst zulassen, wenn sich etwas vom Ausgangszustand unterscheidet.
+  const veraendert =
+    name.trim() !== kunde.name ||
+    ansprech.trim() !== (kunde.ansprechpartner ?? '') ||
+    email.trim() !== (kunde.email ?? '') ||
+    telefon.trim() !== (kunde.telefon ?? '') ||
+    nummer.trim() !== (kunde.kundennummer ?? '') ||
+    intern !== kunde.intern
 
   async function speichern(e: FormEvent) {
     e.preventDefault()
@@ -231,7 +253,8 @@ function KundeDialog({
         ansprechpartner: ansprech.trim() || null,
         email: email.trim() || null,
         telefon: telefon.trim() || null,
-        stundensatz: satz.trim() ? Number(satz.replace(',', '.')) : null,
+        kundennummer: nummer.trim() || null,
+        intern,
       })
       .eq('id', kunde.id)
     if (error) {
@@ -264,8 +287,16 @@ function KundeDialog({
           <input value={telefon} onChange={(e) => setTelefon(e.target.value)} />
         </label>
         <label>
-          Stundensatz in € (optional)
-          <input value={satz} onChange={(e) => setSatz(e.target.value)} inputMode="decimal" />
+          Kundennummer
+          <input
+            value={nummer}
+            onChange={(e) => setNummer(e.target.value)}
+            placeholder="z. B. K-0007"
+          />
+        </label>
+        <label className="checkbox-inline">
+          <input type="checkbox" checked={intern} onChange={(e) => setIntern(e.target.checked)} />
+          Interner Kunde
         </label>
         <div className="modal-aktionen">
           <span />
@@ -273,7 +304,12 @@ function KundeDialog({
             <button type="button" className="btn-ghost" onClick={onSchliessen}>
               Abbrechen
             </button>
-            <button className="btn-primary" type="submit">
+            <button
+              className="btn-primary"
+              type="submit"
+              disabled={!veraendert}
+              title={!veraendert ? 'Es wurde nichts geändert' : undefined}
+            >
               Speichern
             </button>
           </div>

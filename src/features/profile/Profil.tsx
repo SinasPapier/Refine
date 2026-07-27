@@ -26,6 +26,12 @@ export default function Profil({
   const [status, setStatus] = useState('')
   const [speichert, setSpeichert] = useState(false)
 
+  // Vergleich mit dem gespeicherten Stand: Speichern bleibt sonst inaktiv.
+  const veraendert =
+    name.trim() !== (meinProfil?.name ?? '').trim() ||
+    farbe !== (meinProfil?.farbe || STANDARD_FARBE) ||
+    (!begruessung && status.trim() !== (meinProfil?.status_text ?? '').trim())
+
   useEffect(() => {
     if (!meinProfil) return
     setName((meinProfil.name ?? '').trim())
@@ -130,13 +136,19 @@ export default function Profil({
         </span>
       </div>
 
-      <button className="btn-primary" type="submit" disabled={speichert}>
+      <button
+        className="btn-primary"
+        type="submit"
+        disabled={speichert || !veraendert}
+        title={!veraendert ? 'Es wurde nichts geändert' : undefined}
+      >
         {speichert ? 'Speichert…' : 'Speichern'}
       </button>
 
       {!begruessung && (
         <p className="muted small">
           Angemeldet als {session?.user.email}
+          {meinProfil?.ist_admin && ' · Administrator'}
         </p>
       )}
     </form>

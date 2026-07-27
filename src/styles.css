@@ -1050,3 +1050,117 @@ th {
 @media (max-width: 820px) {
   .team-grid { grid-template-columns: 1fr; }
 }
+
+/* ========================================================================
+   Stundensätze, Aufteilen, Deadlines
+   ======================================================================== */
+.timer-satz { max-width: 190px; }
+
+.modal.breit { max-width: 620px; }
+
+.teil-zeile {
+  display: grid;
+  grid-template-columns: 90px 190px 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+.teil-dauer { text-align: center; }
+.teil-fuss {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.rest { font-size: 0.88rem; font-weight: 600; }
+.rest.ok { color: var(--ok); }
+.rest.offen { color: #b45309; }
+
+/* Deadlines im Monatsraster */
+.kal-deadline {
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  color: #9a3412;
+  font-size: 0.71rem;
+  border-radius: 4px;
+  padding: 1px 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kal-deadline.ueberfaellig {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #b91c1c;
+  font-weight: 600;
+}
+.kal-deadline.erledigt {
+  background: #f3f4f6;
+  border-color: var(--border);
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+/* Deadlines in der Wochenansicht */
+.kal-deadline-karte {
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  color: #9a3412;
+  border-radius: 7px;
+  padding: 6px 8px;
+  font-size: 0.78rem;
+  text-align: left;
+  cursor: pointer;
+  font-weight: 600;
+}
+.kal-deadline-karte.ueberfaellig {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #b91c1c;
+}
+.kal-deadline-karte.erledigt {
+  background: #f3f4f6;
+  border-color: var(--border);
+  color: var(--muted);
+  text-decoration: line-through;
+  font-weight: 400;
+}
+.kal-plus.deadline:hover { border-color: #fdba74; color: #9a3412; }
+.tag-liste.deadlines li { background: #fffaf5; }
+.durchgestrichen { text-decoration: line-through; color: var(--muted); }
+
+/* Nächste Deadlines auf der Übersicht */
+.deadline-liste { list-style: none; margin: 0; padding: 0; }
+.deadline-liste li {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.92rem;
+}
+.deadline-datum { min-width: 92px; font-weight: 600; }
+.deadline-titel { flex: 1; }
+
+/* Abrechnung: Aufschlüsselung nach Tätigkeit */
+.abr-saetze { margin-top: 6px; }
+.abr-saetze td { border-bottom: 1px dashed var(--border); }
+.abr-saetze .rechts { text-align: right; }
+.abr-saetze tr.unzugeordnet td { color: var(--muted); font-style: italic; }
+.tag-intern {
+  margin-left: 9px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  background: #eceef1;
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 2px 9px;
+  vertical-align: middle;
+}
+
+@media (max-width: 820px) {
+  .timer-satz { max-width: none; width: 100%; }
+  .teil-zeile { grid-template-columns: 1fr 1fr; }
+  .teil-zeile input:nth-child(3) { grid-column: 1 / -1; }
+}

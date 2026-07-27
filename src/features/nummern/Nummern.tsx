@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import type { Nummernkreis, NummernLog, NummernTyp } from '../../lib/types'
+import { NUMMERN_REIHENFOLGE } from '../../lib/types'
 import { useToast } from '../../components/Toast'
 import { formatZeitstempel } from '../../lib/format'
 import { useProfiles } from '../profile/ProfileProvider'
@@ -35,7 +36,7 @@ async function inZwischenablage(text: string): Promise<boolean> {
 
 export default function Nummern() {
   const toast = useToast()
-  const { nameVon } = useProfiles()
+  const { nameVon, meinProfil } = useProfiles()
   const [kreise, setKreise] = useState<Nummernkreis[]>([])
   const [log, setLog] = useState<NummernLog[]>([])
   const [notiz, setNotiz] = useState('')
@@ -53,7 +54,12 @@ export default function Nummern() {
 
   async function ladeKreise() {
     const { data } = await supabase.from('nummernkreise').select('*')
-    setKreise((data as Nummernkreis[]) ?? [])
+    // Feste Anzeigereihenfolge. Ohne sie bestimmt die Datenbank die Sortierung
+    // und ein geänderter Datensatz rutscht ans Ende der Liste.
+    const liste = ((data as Nummernkreis[]) ?? []).slice().sort(
+      (a, b) => NUMMERN_REIHENFOLGE.indexOf(a.typ) - NUMMERN_REIHENFOLGE.indexOf(b.typ),
+    )
+    setKreise(liste)
   }
 
   useEffect(() => {
@@ -127,7 +133,11 @@ export default function Nummern() {
         )}
       </div>
 
-      <Einstellungen kreise={kreise} onGespeichert={ladeKreise} />
+      <Einstellungen
+        kreise={kreise}
+        istAdmin={meinProfil?.ist_admin ?? false}
+        onGespeichert={ladeKreise}
+      />
 
       <h2>Dokumentation</h2>
       {log.length === 0 ? (
@@ -166,9 +176,11 @@ export default function Nummern() {
 
 function Einstellungen({
   kreise,
+  istAdmin,
   onGespeichert,
 }: {
   kreise: Nummernkreis[]
+  istAdmin: boolean
   onGespeichert: () => void
 }) {
   const toast = useToast()
@@ -187,9 +199,15 @@ function Einstellungen({
   return (
     <div className="card">
       <button className="collapse-head" onClick={() => setOffen((o) => !o)}>
-        {offen ? '▾' : '▸'} Format der Nummern anpassen
+        {offen ? '▾' : '▸'} Format und Zähler anpassen
       </button>
-      {offen && (
+      {offen && !istAdmin && (
+        <p className="muted small">
+          Format und Zähler kann nur ein Administrator ändern – so bleibt die
+          Nummernfolge verlässlich.
+        </p>
+      )}
+      {offen && istAdmin && (
         <div className="table-wrap">
           <table>
             <thead>
@@ -199,7 +217,8 @@ function Einstellungen({
                 <th>Mit Jahr</th>
                 <th>Reset pro Jahr</th>
                 <th>Stellen</th>
-                <th>Aktueller Zähler</th>
+                <th>Zähler</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -210,7 +229,8 @@ function Einstellungen({
           </table>
           <p className="muted small">
             Beispiel: Präfix <code>RE-</code>, „Mit Jahr" an und 4 Stellen ergibt{' '}
-            <code>RE-2026-0001</code>.
+            <code>RE-2026-0001</code>. Der Zähler ist die zuletzt vergebene Nummer –
+            die nächste erzeugte ist um eins höher.
           </p>
         </div>
       )}
@@ -229,16 +249,24 @@ function KreisZeile({
   const [mitJahr, setMitJahr] = useState(kreis.mit_jahr)
   const [reset, setReset] = useState(kreis.reset_pro_jahr)
   const [stellen, setStellen] = useState(kreis.stellen)
+  const [zaehler, setZaehler] = useState(String(kreis.zaehler))
+
+  const zaehlerZahl = parseInt(zaehler, 10)
+  const zaehlerGueltig = Number.isFinite(zaehlerZahl) && zaehlerZahl >= 0
+
+  // Speichern erst zulassen, wenn sich wirklich etwas unterscheidet.
+  const veraendert =
+    praefix !== kreis.praefix ||
+    mitJahr !== kreis.mit_jahr ||
+    reset !== kreis.reset_pro_jahr ||
+    stellen !== kreis.stellen ||
+    (zaehlerGueltig && zaehlerZahl !== kreis.zaehler)
 
   return (
     <tr>
       <td>{LABELS[kreis.typ]}</td>
       <td>
-        <input
-          className="mini"
-          value={praefix}
-          onChange={(e) => setPraefix(e.target.value)}
-        />
+        <input className="mini" value={praefix} onChange={(e) => setPraefix(e.target.value)} />
       </td>
       <td>
         <input
@@ -248,11 +276,7 @@ function KreisZeile({
         />
       </td>
       <td>
-        <input
-          type="checkbox"
-          checked={reset}
-          onChange={(e) => setReset(e.target.checked)}
-        />
+        <input type="checkbox" checked={reset} onChange={(e) => setReset(e.target.checked)} />
       </td>
       <td>
         <input
@@ -265,16 +289,26 @@ function KreisZeile({
         />
       </td>
       <td>
-        {kreis.zaehler}
+        <input
+          className="mini"
+          type="number"
+          min={0}
+          value={zaehler}
+          onChange={(e) => setZaehler(e.target.value)}
+        />
+      </td>
+      <td>
         <button
           className="btn-ghost small"
-          style={{ marginLeft: 8 }}
+          disabled={!veraendert || !zaehlerGueltig}
+          title={!veraendert ? 'Es wurde nichts geändert' : undefined}
           onClick={() =>
             onSpeichere(kreis.typ, {
               praefix,
               mit_jahr: mitJahr,
               reset_pro_jahr: reset,
               stellen,
+              zaehler: zaehlerZahl,
             })
           }
         >
