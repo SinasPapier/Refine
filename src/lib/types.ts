@@ -38,6 +38,10 @@ export interface Projekt {
   erledigt_am: string | null
   /** Laufende Nummer je Kunde; die Anzeige entsteht aus der Kundennummer. */
   lfd_nummer: number | null
+  /** Gesetzt heißt: im Papierkorb. Die Zeile bleibt, damit gebuchte Zeiten
+   *  ihre Zuordnung behalten und das Zurückholen ein update bleibt. */
+  geloescht_am: string | null
+  geloescht_von: string | null
   created_at: string
 }
 

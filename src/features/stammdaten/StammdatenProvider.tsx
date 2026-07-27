@@ -14,7 +14,10 @@ import { useAuth } from '../auth/useAuth'
 
 interface StammdatenState {
   kunden: Kunde[]
+  /** Ohne die entfernten – für Listen, Zählungen und Auswahl. */
   projekte: Projekt[]
+  /** Der Papierkorb: entfernte Projekte, zuletzt entferntes zuerst. */
+  geloeschteProjekte: Projekt[]
   /** Nur nicht archivierte – für Auswahllisten. */
   aktiveKunden: Kunde[]
   aktiveProjekte: Projekt[]
@@ -39,6 +42,7 @@ interface StammdatenState {
 const leer: StammdatenState = {
   kunden: [],
   projekte: [],
+  geloeschteProjekte: [],
   aktiveKunden: [],
   aktiveProjekte: [],
   laden: true,
@@ -62,7 +66,8 @@ export function useStammdaten() {
 export function StammdatenProvider({ children }: { children: ReactNode }) {
   const { session } = useAuth()
   const [kunden, setKunden] = useState<Kunde[]>([])
-  const [projekte, setProjekte] = useState<Projekt[]>([])
+  // Inklusive der entfernten: alte Buchungen sollen ihren Projektnamen behalten.
+  const [alleProjekte, setAlleProjekte] = useState<Projekt[]>([])
   const [saetze, setSaetze] = useState<Stundensatz[]>([])
   const [laden, setLaden] = useState(true)
 
@@ -81,7 +86,7 @@ export function StammdatenProvider({ children }: { children: ReactNode }) {
       return a.name.localeCompare(b.name)
     })
     setKunden(kundenListe)
-    setProjekte((p as Projekt[]) ?? [])
+    setAlleProjekte((p as Projekt[]) ?? [])
     setSaetze((s as Stundensatz[]) ?? [])
     setLaden(false)
   }, [])
@@ -89,7 +94,7 @@ export function StammdatenProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!session) {
       setKunden([])
-      setProjekte([])
+      setAlleProjekte([])
       setSaetze([])
       setLaden(false)
       return
@@ -98,16 +103,20 @@ export function StammdatenProvider({ children }: { children: ReactNode }) {
   }, [session, neuLaden])
 
   const wert = useMemo<StammdatenState>(() => {
+    // Die Nachschlagefunktionen suchen bewusst in ALLEN Projekten, auch in den
+    // entfernten. Sonst würde eine alte Buchung auf einem entfernten Projekt in
+    // Abrechnung und Kalender stillschweigend als "ohne Projekt" erscheinen –
+    // also genau der Zuordnungsverlust, den der Papierkorb verhindern soll.
     const kundeVonProjekt = (projektId: string | null) => {
       if (!projektId) return null
-      const proj = projekte.find((p) => p.id === projektId)
+      const proj = alleProjekte.find((p) => p.id === projektId)
       if (!proj) return null
       return kunden.find((k) => k.id === proj.kunde_id) ?? null
     }
 
     const projektLabel = (projektId: string | null) => {
       if (!projektId) return '—'
-      const proj = projekte.find((p) => p.id === projektId)
+      const proj = alleProjekte.find((p) => p.id === projektId)
       if (!proj) return '—'
       const kunde = kundeVonProjekt(projektId)
       return kunde ? `${kunde.name} · ${proj.name}` : proj.name
@@ -115,8 +124,16 @@ export function StammdatenProvider({ children }: { children: ReactNode }) {
 
     const projektName = (projektId: string | null) => {
       if (!projektId) return 'ohne Projekt'
-      return projekte.find((p) => p.id === projektId)?.name ?? 'ohne Projekt'
+      return alleProjekte.find((p) => p.id === projektId)?.name ?? 'ohne Projekt'
     }
+
+    // Alles ab hier arbeitet ohne die entfernten Projekte: Listen, Zählungen
+    // und jede Auswahl.
+    const projekte = alleProjekte.filter((p) => !p.geloescht_am)
+    const geloeschteProjekte = alleProjekte
+      .filter((p) => p.geloescht_am)
+      .slice()
+      .sort((a, b) => (b.geloescht_am ?? '').localeCompare(a.geloescht_am ?? ''))
 
     // Projekte archivierter Kunden gehören ebenfalls nicht mehr in die Auswahl.
     const aktiveKunden = kunden.filter((k) => !k.archiviert)
@@ -143,6 +160,7 @@ export function StammdatenProvider({ children }: { children: ReactNode }) {
     return {
       kunden,
       projekte,
+      geloeschteProjekte,
       aktiveKunden,
       aktiveProjekte,
       laden,
@@ -156,7 +174,7 @@ export function StammdatenProvider({ children }: { children: ReactNode }) {
       istInternesProjekt,
       projekteVonKunde,
     }
-  }, [kunden, projekte, saetze, laden, neuLaden])
+  }, [kunden, alleProjekte, saetze, laden, neuLaden])
 
   return (
     <StammdatenContext.Provider value={wert}>{children}</StammdatenContext.Provider>
