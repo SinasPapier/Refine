@@ -30,11 +30,15 @@ export function parseDauerZuMinuten(eingabe: string): number | null {
   return Math.round(dezimal * 60)
 }
 
-/** ISO-Datum -> "26.07.2026" */
+/** ISO-Datum -> "26.07.2026" (immer zweistellig, damit Listen ruhig wirken) */
 export function formatDatum(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleDateString('de-DE')
+  return d.toLocaleDateString('de-DE', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  })
 }
 
 /** ISO-Zeitstempel -> "26.07.2026, 14:03" */

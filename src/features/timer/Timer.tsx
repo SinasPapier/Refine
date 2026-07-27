@@ -1,14 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import type { LaufendeZeit } from '../../lib/types'
-import { formatDauer, parseDauerZuMinuten } from '../../lib/format'
-import { isoDatum } from '../../lib/datum'
+import { formatDatum, formatDauer, parseDauerZuMinuten } from '../../lib/format'
+import { isoDatum, uhrzeit } from '../../lib/datum'
+import { pruefeBuchung } from '../../lib/pruefung'
 import { useToast } from '../../components/Toast'
 import { useAuth } from '../auth/useAuth'
 import { useStammdaten } from '../stammdaten/StammdatenProvider'
 
-/** Ab dieser Laufzeit fragen wir beim Stoppen nach (vergessene Uhr). */
-const WARNGRENZE_MINUTEN = 10 * 60
+/** Ab hier weist die Leiste sichtbar darauf hin, dass die Uhr lange läuft. */
+export const WARNGRENZE_MINUTEN = 6 * 60
+
+/**
+ * Ab hier gehen wir von einer vergessenen Uhr aus: Beim Öffnen der App
+ * erscheint dann von selbst die Nachfrage. Gebucht wird trotzdem nie
+ * automatisch – eine falsche Buchung ohne Zutun wäre schlimmer als eine
+ * offene Uhr.
+ */
+const NACHFRAGE_GRENZE_MINUTEN = 10 * 60
 
 function stoppuhrAnzeige(sekunden: number): string {
   const h = Math.floor(sekunden / 3600)
@@ -50,6 +59,8 @@ export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
   const [dialogTaetigkeit, setDialogTaetigkeit] = useState('')
   const [dialogText, setDialogText] = useState('')
   const [speichert, setSpeichert] = useState(false)
+  // Verhindert, dass die Nachfrage bei jedem Neuladen der Daten erneut aufgeht.
+  const nachgefragt = useRef(false)
 
   const uid = session?.user.id
 
@@ -115,7 +126,7 @@ export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
     laden()
   }
 
-  function stoppenVorbereiten() {
+  const stoppenVorbereiten = useCallback(() => {
     if (!laufend) return
     const start = new Date(laufend.gestartet_am)
     const ende = new Date()
@@ -125,7 +136,18 @@ export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
     setDialogProjekt(laufend.projekt_id ?? '')
     setDialogTaetigkeit(laufend.taetigkeit ?? '')
     setDialogText(laufend.beschreibung ?? '')
-  }
+  }, [laufend])
+
+  // Läuft die Uhr beim Öffnen schon ungewöhnlich lange, wurde vermutlich das
+  // Stoppen vergessen. Dann einmal von selbst nachfragen.
+  useEffect(() => {
+    if (!laufend || nachgefragt.current) return
+    const minuten = (Date.now() - new Date(laufend.gestartet_am).getTime()) / 60000
+    if (minuten > NACHFRAGE_GRENZE_MINUTEN) {
+      nachgefragt.current = true
+      stoppenVorbereiten()
+    }
+  }, [laufend, stoppenVorbereiten])
 
   async function buchen() {
     if (!uid || !dialog) return
@@ -175,15 +197,36 @@ export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
   const sekunden = laufend
     ? Math.max(0, Math.floor((jetzt - new Date(laufend.gestartet_am).getTime()) / 1000))
     : 0
+  const laeuftLange = sekunden / 60 > WARNGRENZE_MINUTEN
+
+  // Über Mitternacht wird auf den Starttag gebucht – das ist gewollt, aber
+  // sonst nicht ersichtlich.
+  const ueberMitternacht =
+    dialog !== null && isoDatum(new Date(dialog.start)) !== isoDatum(new Date(dialog.ende))
+
+  const dialogMinuten = parseDauerZuMinuten(dialogDauer)
+  const dialogHinweis =
+    dialogMinuten !== null && dialogMinuten > 0
+      ? pruefeBuchung(dialogMinuten, dialog ? isoDatum(new Date(dialog.start)) : '')
+      : null
 
   return (
     <>
-      <div className={laufend ? 'timer-bar aktiv' : 'timer-bar'}>
+      <div
+        className={
+          laufend ? `timer-bar aktiv${laeuftLange ? ' warnung' : ''}` : 'timer-bar'
+        }
+      >
         {laufend ? (
           <>
             <span className="timer-punkt" aria-hidden="true" />
             <span className="timer-uhr">{stoppuhrAnzeige(sekunden)}</span>
             <span className="timer-info">
+              {laeuftLange && (
+                <strong className="timer-warntext">
+                  Läuft seit {formatDauer(Math.floor(sekunden / 60))} – Stoppen vergessen?{' '}
+                </strong>
+              )}
               {projektLabel(laufend.projekt_id)}
               {laufend.taetigkeit ? ` · ${bezeichnungVon(laufend.taetigkeit)}` : ''}
               {laufend.beschreibung ? ` – ${laufend.beschreibung}` : ''}
@@ -242,8 +285,17 @@ export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
 
             {dialog.minuten > WARNGRENZE_MINUTEN && (
               <div className="hinweis-warnung">
-                Die Uhr lief {formatDauer(dialog.minuten)}. Wurde das Stoppen
-                vergessen? Du kannst die Dauer unten korrigieren.
+                Die Uhr lief {formatDauer(dialog.minuten)} – gestartet am{' '}
+                {formatDatum(isoDatum(new Date(dialog.start)))} um{' '}
+                {uhrzeit(dialog.start)} Uhr. Wurde das Stoppen vergessen?
+                Korrigiere die Dauer unten auf die tatsächlich gearbeitete Zeit.
+              </div>
+            )}
+
+            {ueberMitternacht && (
+              <div className="hinweis-info">
+                Die Uhr lief über Mitternacht. Der Eintrag wird auf den Starttag
+                ({formatDatum(isoDatum(new Date(dialog.start)))}) gebucht.
               </div>
             )}
 
@@ -298,6 +350,8 @@ export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
               />
             </label>
 
+            {dialogHinweis && <div className="hinweis-warnung">{dialogHinweis}</div>}
+
             <div className="modal-aktionen">
               <button className="btn-ghost danger" onClick={verwerfen}>
                 Verwerfen
@@ -307,7 +361,7 @@ export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
                   Weiterlaufen lassen
                 </button>
                 <button className="btn-primary" onClick={buchen} disabled={speichert}>
-                  {speichert ? 'Speichert…' : 'Speichern'}
+                  {speichert ? 'Speichert…' : dialogHinweis ? 'Trotzdem speichern' : 'Speichern'}
                 </button>
               </div>
             </div>

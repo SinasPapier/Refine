@@ -154,7 +154,6 @@ export default function Kunden() {
                 <th>Name</th>
                 <th>Ansprechpartner</th>
                 <th>Kontakt</th>
-                <th>Art</th>
                 <th>Projekte</th>
                 <th></th>
               </tr>
@@ -162,36 +161,42 @@ export default function Kunden() {
             <tbody>
               {sichtbar.map((k) => (
                 <tr key={k.id}>
-                  <td>
+                  <td className="nowrap">
                     <code>{k.kundennummer ?? '—'}</code>
                   </td>
-                  <td>{k.name}</td>
-                  <td>{k.ansprechpartner ?? '—'}</td>
                   <td>
-                    {k.email ?? ''}
-                    {k.email && k.telefon ? ' · ' : ''}
-                    {k.telefon ?? ''}
-                    {!k.email && !k.telefon ? '—' : ''}
+                    {k.name}
+                    {k.intern && <span className="tag-intern">intern</span>}
                   </td>
-                  <td>{k.intern ? 'intern' : 'Kunde'}</td>
-                  <td>
+                  <td>{k.ansprechpartner ?? '—'}</td>
+                  <td className="spalte-kontakt">
+                    {k.email && <div className="kontakt-zeile">{k.email}</div>}
+                    {k.telefon && <div className="kontakt-zeile nowrap">{k.telefon}</div>}
+                    {!k.email && !k.telefon && '—'}
+                  </td>
+                  <td className="nowrap">
                     <button
-                      className="btn-ghost small"
+                      className="link-knopf"
                       onClick={() => setAusgewaehlt(ausgewaehlt === k.id ? null : k.id)}
                     >
-                      {projekte.filter((p) => p.kunde_id === k.id).length} Projekt(e)
+                      {(() => {
+                        const n = projekte.filter((p) => p.kunde_id === k.id).length
+                        return `${n} ${n === 1 ? 'Projekt' : 'Projekte'}`
+                      })()}
                     </button>
                   </td>
-                  <td className="aktionen">
-                    <button className="btn-ghost small" onClick={() => setBearbeiten(k)}>
-                      Bearbeiten
-                    </button>
-                    <button
-                      className="btn-ghost small"
-                      onClick={() => archivieren(k, !k.archiviert)}
-                    >
-                      {k.archiviert ? 'Reaktivieren' : 'Archivieren'}
-                    </button>
+                  <td className="spalte-aktionen">
+                    <div className="aktionen">
+                      <button className="btn-ghost small" onClick={() => setBearbeiten(k)}>
+                        Bearbeiten
+                      </button>
+                      <button
+                        className="btn-ghost small"
+                        onClick={() => archivieren(k, !k.archiviert)}
+                      >
+                        {k.archiviert ? 'Reaktivieren' : 'Archivieren'}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

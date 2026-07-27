@@ -8,6 +8,7 @@ import { useToast } from '../../components/Toast'
 import { useAuth } from '../auth/useAuth'
 import { useProfiles } from '../profile/ProfileProvider'
 import { useStammdaten } from '../stammdaten/StammdatenProvider'
+import { WARNGRENZE_MINUTEN } from '../timer/Timer'
 
 /** Laufende Uhr als hh:mm:ss. */
 function stoppuhrAnzeige(sekunden: number): string {
@@ -144,6 +145,8 @@ export default function Team() {
           const sekunden = laeuft
             ? Math.max(0, Math.floor((jetzt - new Date(laeuft.gestartet_am).getTime()) / 1000))
             : 0
+          // Auch die Mitgesellschafter sollen sehen, wenn eine Uhr zu lange läuft.
+          const laeuftLange = sekunden / 60 > WARNGRENZE_MINUTEN
 
           return (
             <div
@@ -158,7 +161,7 @@ export default function Team() {
               </div>
 
               {laeuft ? (
-                <div className="team-aktiv">
+                <div className={laeuftLange ? 'team-aktiv warnung' : 'team-aktiv'}>
                   <div className="team-aktiv-kopf">
                     <span className="puls" style={{ background: farbeVon(p.id) }} />
                     <span className="team-uhr">{stoppuhrAnzeige(sekunden)}</span>
@@ -168,6 +171,9 @@ export default function Team() {
                     <div className="muted small">{laeuft.beschreibung}</div>
                   )}
                   <div className="muted small">seit {uhrzeit(laeuft.gestartet_am)} Uhr</div>
+                  {laeuftLange && (
+                    <div className="team-warnung">Läuft ungewöhnlich lange</div>
+                  )}
                 </div>
               ) : (
                 <div className="team-ruht muted small">Arbeitet gerade nicht</div>

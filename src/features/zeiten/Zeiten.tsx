@@ -36,12 +36,6 @@ export default function Zeiten() {
     laden()
   }, [laden])
 
-  async function loeschen(id: string) {
-    if (!confirm('Diesen Zeiteintrag löschen?')) return
-    await supabase.from('arbeitszeiten').delete().eq('id', id)
-    laden()
-  }
-
   const gefiltert = useMemo(
     () =>
       zeiten.filter((z) => {
@@ -129,7 +123,7 @@ export default function Zeiten() {
                   const eigen = z.gesellschafter_id === session?.user.id
                   return (
                     <tr key={z.id}>
-                      <td>
+                      <td className="nowrap">
                         {formatDatum(z.datum)}
                         {uhrzeit(z.start_zeit) && (
                           <span className="muted small"> · {uhrzeit(z.start_zeit)}</span>
@@ -143,42 +137,40 @@ export default function Zeiten() {
                         {nameVon(z.gesellschafter_id)}
                       </td>
                       <td>{projektLabel(z.projekt_id)}</td>
-                      <td>{z.beschreibung ?? '—'}</td>
-                      <td>
+                      <td className="spalte-text" title={z.beschreibung ?? ''}>
+                        {z.beschreibung ?? '—'}
+                      </td>
+                      <td className="nowrap">
                         {z.taetigkeit ? (
                           bezeichnungVon(z.taetigkeit)
                         ) : (
                           <span className="muted">nicht zugeordnet</span>
                         )}
                       </td>
-                      <td>{formatDauer(z.dauer_minuten)}</td>
-                      <td>
+                      <td className="nowrap">{formatDauer(z.dauer_minuten)}</td>
+                      <td className="nowrap">
                         {(((z.stundensatz ?? 0) * z.dauer_minuten) / 60).toLocaleString(
                           'de-DE',
                           { style: 'currency', currency: 'EUR' },
                         )}
                       </td>
-                      <td className="aktionen">
-                        {eigen && (
-                          <>
-                            <button className="btn-ghost small" onClick={() => setDialog(z)}>
-                              Bearbeiten
-                            </button>
-                            <button
-                              className="btn-ghost small"
-                              onClick={() => setAufteilen(z)}
-                              title="Auf mehrere Tätigkeiten aufteilen"
-                            >
-                              Aufteilen
-                            </button>
-                            <button
-                              className="btn-ghost small danger"
-                              onClick={() => loeschen(z.id)}
-                            >
-                              Löschen
-                            </button>
-                          </>
-                        )}
+                      <td className="spalte-aktionen">
+                        <div className="aktionen">
+                          {eigen && (
+                            <>
+                              <button className="btn-ghost small" onClick={() => setDialog(z)}>
+                                Bearbeiten
+                              </button>
+                              <button
+                                className="btn-ghost small"
+                                onClick={() => setAufteilen(z)}
+                                title="Auf mehrere Tätigkeiten aufteilen"
+                              >
+                                Aufteilen
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   )

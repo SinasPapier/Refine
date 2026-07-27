@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase'
 import type { Arbeitszeit } from '../../lib/types'
 import { formatDauer, parseDauerZuMinuten } from '../../lib/format'
 import { heuteIso } from '../../lib/datum'
+import { pruefeBuchung } from '../../lib/pruefung'
 import { useToast } from '../../components/Toast'
 import { useAuth } from '../auth/useAuth'
 import { useStammdaten } from '../stammdaten/StammdatenProvider'
@@ -66,6 +67,10 @@ export default function ZeitDialog({
   // Bei neuen Einträgen zählt eine ausgefüllte Dauer als Änderung.
   const speicherbar = eintrag ? veraendert : dauer.trim().length > 0
 
+  // Hinweis auf unplausible Eingaben – blockiert nicht, macht aber aufmerksam.
+  const geparst = parseDauerZuMinuten(dauer)
+  const hinweis = geparst !== null && geparst > 0 ? pruefeBuchung(geparst, datum) : null
+
   function projektWechseln(neu: string) {
     setProjektId(neu)
     if (istInternesProjekt(neu)) setTaetigkeit('intern')
@@ -102,6 +107,15 @@ export default function ZeitDialog({
       return
     }
     toast(eintrag ? 'Eintrag geändert.' : `${formatDauer(minuten)} erfasst.`)
+    onGespeichert()
+    onSchliessen()
+  }
+
+  async function loeschen() {
+    if (!eintrag) return
+    if (!confirm('Diesen Zeiteintrag löschen?')) return
+    await supabase.from('arbeitszeiten').delete().eq('id', eintrag.id)
+    toast('Eintrag gelöscht.')
     onGespeichert()
     onSchliessen()
   }
@@ -167,8 +181,16 @@ export default function ZeitDialog({
           />
         </label>
 
+        {hinweis && <div className="hinweis-warnung">{hinweis}</div>}
+
         <div className="modal-aktionen">
-          <span />
+          {eintrag ? (
+            <button type="button" className="btn-ghost danger" onClick={loeschen}>
+              Löschen
+            </button>
+          ) : (
+            <span />
+          )}
           <div className="modal-rechts">
             <button type="button" className="btn-ghost" onClick={onSchliessen}>
               Abbrechen
@@ -179,7 +201,7 @@ export default function ZeitDialog({
               disabled={speichert || !speicherbar}
               title={!speicherbar ? 'Es wurde nichts geändert' : undefined}
             >
-              {speichert ? 'Speichert…' : 'Speichern'}
+              {speichert ? 'Speichert…' : hinweis ? 'Trotzdem speichern' : 'Speichern'}
             </button>
           </div>
         </div>
