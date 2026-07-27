@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import type { Arbeitszeit, LaufendeZeit, Position, Termin } from '../../lib/types'
-import { POSITION_STATUS } from '../../lib/types'
+import { NAECHSTER_STATUS, POSITION_STATUS } from '../../lib/types'
+import StatusUrheber from '../../components/StatusUrheber'
+import { useToast } from '../../components/Toast'
+import { useAuth } from '../auth/useAuth'
 import { formatDauer } from '../../lib/format'
 import { formatDatum } from '../../lib/format'
 import { heuteIso, isoDatum } from '../../lib/datum'
@@ -11,7 +14,18 @@ import { projektNummer } from '../kunden/ProjekteDialog'
 
 type Zeitraum = 'monat' | 'jahr' | 'alle'
 
+/**
+ * Wie lange eine erledigte Position noch stehen bleibt.
+ *
+ * Ohne diese Wartezeit verschwände die Zeile im selben Moment, in dem man sie
+ * anklickt – man sähe nicht, ob man die richtige erwischt hat. So bleibt sie
+ * sichtbar erledigt stehen, und ein weiterer Klick nimmt es zurück.
+ */
+const COOLDOWN_SEKUNDEN = 10
+
 export default function Dashboard() {
+  const toast = useToast()
+  const { session } = useAuth()
   const { profiles, nameVon, farbeVon } = useProfiles()
   const { kunden, kundeVonProjekt, projektLabel, projekte, terminSichtbar } =
     useStammdaten()
@@ -20,6 +34,13 @@ export default function Dashboard() {
   const [termine, setTermine] = useState<Termin[]>([])
   const [positionen, setPositionen] = useState<Position[]>([])
   const [zeitraum, setZeitraum] = useState<Zeitraum>('monat')
+
+  /** Erledigte Positionen, die noch stehen: Kennung → Ablaufzeitpunkt. */
+  const [wartend, setWartend] = useState<Record<string, number>>({})
+  /** Laufende Timer, damit ein erneuter Klick sie abbrechen kann. */
+  const timer = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  /** Sekundentakt für die Restanzeige – läuft nur, solange etwas wartet. */
+  const [, tick] = useState(0)
 
   useEffect(() => {
     Promise.all([
@@ -80,6 +101,84 @@ export default function Dashboard() {
     return kunden.find((k) => k.id === id)?.name ?? 'Unbekannt'
   }
 
+  /**
+   * Schaltet den Status weiter: offen → in Arbeit → erledigt → offen.
+   *
+   * Der lokale Zustand wird von Hand nachgezogen statt neu geladen. Ein
+   * Neuladen würde die eben erledigte Position sofort wegwerfen – die Abfrage
+   * oben holt ja nur nicht erledigte – und damit die Wartezeit aushebeln.
+   */
+  const statusWeiter = useCallback(
+    async (pos: Position) => {
+      const neu = NAECHSTER_STATUS[pos.status]
+
+      // erledigt_am, status_von und status_am setzt der Trigger.
+      const { error } = await supabase
+        .from('positionen')
+        .update({ status: neu })
+        .eq('id', pos.id)
+      if (error) {
+        toast('Status konnte nicht geändert werden.', 'fehler')
+        return
+      }
+
+      setPositionen((liste) =>
+        liste.map((p) =>
+          p.id === pos.id
+            ? {
+                ...p,
+                status: neu,
+                status_von: session?.user.id ?? p.status_von,
+                status_am: new Date().toISOString(),
+              }
+            : p,
+        ),
+      )
+
+      // Ein noch laufender Countdown gehört in jedem Fall abgebrochen: Beim
+      // Weiterschalten auf "offen" ist das die Rücknahme des Fehlgriffs, beim
+      // erneuten Erledigen beginnt die Wartezeit von vorn.
+      clearTimeout(timer.current[pos.id])
+      delete timer.current[pos.id]
+
+      if (neu === 'erledigt') {
+        setWartend((w) => ({ ...w, [pos.id]: Date.now() + COOLDOWN_SEKUNDEN * 1000 }))
+        timer.current[pos.id] = setTimeout(() => {
+          setPositionen((liste) => liste.filter((p) => p.id !== pos.id))
+          setWartend(({ [pos.id]: _weg, ...rest }) => rest)
+          delete timer.current[pos.id]
+        }, COOLDOWN_SEKUNDEN * 1000)
+      } else {
+        setWartend(({ [pos.id]: _weg, ...rest }) => rest)
+      }
+    },
+    [toast, session],
+  )
+
+  // Beim Verlassen der Seite alle Countdowns beenden. Ohne das liefe ein
+  // Timeout weiter und schriebe in einen nicht mehr vorhandenen Zustand.
+  useEffect(() => {
+    const laufende = timer.current
+    return () => {
+      Object.values(laufende).forEach(clearTimeout)
+    }
+  }, [])
+
+  // Sekundentakt für die Restanzeige – nur solange überhaupt etwas wartet.
+  const esWartetEtwas = Object.keys(wartend).length > 0
+  useEffect(() => {
+    if (!esWartetEtwas) return
+    const i = setInterval(() => tick((n) => n + 1), 1000)
+    return () => clearInterval(i)
+  }, [esWartetEtwas])
+
+  /** Verbleibende Sekunden, bis die Zeile verschwindet. */
+  const restSekunden = (id: string): number | null => {
+    const ende = wartend[id]
+    if (!ende) return null
+    return Math.max(0, Math.ceil((ende - Date.now()) / 1000))
+  }
+
   /** Deadlines erledigter oder entfernter Projekte gehören nicht mehr her. */
   const naechsteTermine = useMemo(
     () => termine.filter((t) => terminSichtbar(t.projekt_id)).slice(0, 5),
@@ -111,10 +210,16 @@ export default function Dashboard() {
               .sort((a, b) => a.sortierung - b.sortierung),
           }))
           .filter((p) => p.positionen.length > 0)
-        const offen = eigene.reduce((s, p) => s + p.positionen.length, 0)
+        // Gezählt wird, was noch offen ist. Eine gerade erledigte Position
+        // steht zwar noch da, ist aber nicht mehr offen – deshalb fällt der
+        // Zähler sofort, nicht erst nach Ablauf der Wartezeit.
+        const offen = eigene.reduce(
+          (s, p) => s + p.positionen.filter((pos) => pos.status !== 'erledigt').length,
+          0,
+        )
         return { kunde, projekte: eigene, offen }
       })
-      .filter((g) => g.offen > 0)
+      .filter((g) => g.projekte.length > 0)
   }, [kunden, projekte, positionen])
 
   const offenGesamt = offeneGruppen.reduce((s, g) => s + g.offen, 0)
@@ -208,17 +313,34 @@ export default function Dashboard() {
                         )}{' '}
                         {projekt.name}
                       </span>
-                      <span className="offen-zahl">{pos.length} offen</span>
+                      <span className="offen-zahl">
+                        {pos.filter((p) => p.status !== 'erledigt').length} offen
+                      </span>
                     </summary>
                     <ul className="offen-positionen">
-                      {pos.map((p) => (
-                        <li key={p.id}>
-                          <span className={`status-chip ${p.status} klein`}>
-                            {POSITION_STATUS[p.status]}
-                          </span>
-                          <span>{p.bezeichnung}</span>
-                        </li>
-                      ))}
+                      {pos.map((p) => {
+                        const rest = restSekunden(p.id)
+                        return (
+                          <li key={p.id} className={rest !== null ? 'wartet' : ''}>
+                            <button
+                              className={`status-chip ${p.status}`}
+                              onClick={() => statusWeiter(p)}
+                              title="Status weiterschalten"
+                            >
+                              {POSITION_STATUS[p.status]}
+                            </button>
+                            <span>{p.bezeichnung}</span>
+                            <StatusUrheber
+                              position={p}
+                              nameVon={nameVon}
+                              farbeVon={farbeVon}
+                            />
+                            {rest !== null && (
+                              <span className="offen-rest">verschwindet in {rest} s</span>
+                            )}
+                          </li>
+                        )
+                      })}
                     </ul>
                   </details>
                 ))}

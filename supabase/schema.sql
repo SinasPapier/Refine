@@ -83,6 +83,9 @@ create table if not exists public.positionen (
   status       text not null default 'offen',  -- offen | in_arbeit | erledigt
   sortierung   integer not null default 0,
   erledigt_am  date,
+  -- Wer hat zuletzt umgeschaltet? Wird vom Trigger gesetzt, nicht von der App.
+  status_von   uuid references public.profile (id),
+  status_am    timestamptz,
   created_at   timestamptz not null default now()
 );
 
@@ -201,6 +204,11 @@ alter table public.projekte alter column angelegt_am set not null;
 -- nachvollziehbar, wer wann etwas entfernt hat.
 alter table public.projekte add column if not exists geloescht_am  timestamptz;
 alter table public.projekte add column if not exists geloescht_von uuid references public.profile (id);
+
+-- Wer hat den Status einer Position zuletzt geändert? In einem Team zu dritt
+-- ist das die naheliegende Rückfrage zu "erledigt".
+alter table public.positionen add column if not exists status_von uuid references public.profile (id);
+alter table public.positionen add column if not exists status_am  timestamptz;
 
 -- Am Kunden wieder entfernt: für die Dokumentation zählt der Zeitraum des
 -- Auftrags, nicht der der Kundenbeziehung.
@@ -427,6 +435,39 @@ drop trigger if exists schuetze_angelegt_am_projekte on public.projekte;
 create trigger schuetze_angelegt_am_projekte
   before update on public.projekte
   for each row execute function public.schuetze_angelegt_am();
+
+
+-- Protokolliert jeden Statuswechsel einer Position.
+--
+-- Bewusst im Trigger und nicht in der App: Der Status wird an zwei Stellen
+-- geschaltet (Projektdialog und Übersicht). So steht die Regel einmal, kann in
+-- keinem Aufrufpfad vergessen werden, und "status_von" ist vom Client nicht
+-- fälschbar – sonst ließe sich eine Erledigung einem anderen Gesellschafter
+-- unterschieben.
+create or replace function public.positions_status_protokoll()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if tg_op = 'INSERT' or new.status is distinct from old.status then
+    -- auth.uid() ist null bei direktem Zugriff über den SQL-Editor; dort bleibt
+    -- ein bereits gesetzter Wert stehen, statt ihn zu leeren.
+    new.status_von := coalesce(auth.uid(), new.status_von);
+    new.status_am  := now();
+    -- Das Erledigungsdatum gehört zum selben Vorgang und wird deshalb hier
+    -- gesetzt, statt in jeder Oberfläche einzeln.
+    new.erledigt_am := case when new.status = 'erledigt' then current_date end;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists positions_status_protokoll on public.positionen;
+create trigger positions_status_protokoll
+  before insert or update on public.positionen
+  for each row execute function public.positions_status_protokoll();
 
 
 -- ############################################################################

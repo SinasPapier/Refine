@@ -55,6 +55,9 @@ export interface Position {
   status: PositionStatus
   sortierung: number
   erledigt_am: string | null
+  /** Wer zuletzt umgeschaltet hat – von der Datenbank gesetzt, nicht von der App. */
+  status_von: string | null
+  status_am: string | null
   created_at: string
 }
 
@@ -72,6 +75,14 @@ export const POSITION_STATUS: Record<PositionStatus, string> = {
   offen: 'offen',
   in_arbeit: 'in Arbeit',
   erledigt: 'erledigt',
+}
+
+/** Ein Klick schaltet weiter. Gemeinsam genutzt von Projektdialog und
+ *  Übersicht, damit die Reihenfolge überall dieselbe ist. */
+export const NAECHSTER_STATUS: Record<PositionStatus, PositionStatus> = {
+  offen: 'in_arbeit',
+  in_arbeit: 'erledigt',
+  erledigt: 'offen',
 }
 
 export interface Arbeitszeit {
