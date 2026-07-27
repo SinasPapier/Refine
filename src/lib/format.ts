@@ -65,3 +65,16 @@ export function kundennummerWert(nummer: string | null): number {
   if (!ziffern) return -1
   return parseInt(ziffern, 10)
 }
+
+/**
+ * Vergleichsform eines Firmennamens: Kleinschreibung, ohne Rechtsform und
+ * ohne Satzzeichen. So gilt "Dauth Dienstleistungen e. K." als derselbe
+ * Kunde wie "dauth dienstleistungen".
+ */
+export function nameSchluessel(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\b(gmbh|ag|kg|ohg|gbr|ug|mbh|e\.?\s?k\.?|e\.?\s?v\.?|co|ltd|inc)\b/g, '')
+    .replace(/[^a-zäöüß0-9]/g, '')
+    .trim()
+}

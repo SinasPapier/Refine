@@ -22,10 +22,6 @@ export interface Kunde {
   notiz: string | null
   intern: boolean
   archiviert: boolean
-  /** Beginn des Leistungszeitraums – nur Administratoren dürfen ihn ändern. */
-  angelegt_am: string
-  /** Ende des Leistungszeitraums, wird beim Archivieren gesetzt. */
-  erledigt_am: string | null
   created_at: string
 }
 
@@ -36,9 +32,32 @@ export interface Projekt {
   beschreibung: string | null
   status: string
   archiviert: boolean
+  /** Beginn des Leistungszeitraums – nur Administratoren dürfen ihn ändern. */
   angelegt_am: string
+  /** Ende des Leistungszeitraums, wird beim Abschließen gesetzt. */
+  erledigt_am: string | null
+  /** Laufende Nummer je Kunde; die Anzeige entsteht aus der Kundennummer. */
+  lfd_nummer: number | null
+  created_at: string
+}
+
+/** Bestandteil eines Projekts, z. B. Visitenkarten oder Beachflag. */
+export type PositionStatus = 'offen' | 'in_arbeit' | 'erledigt'
+
+export interface Position {
+  id: string
+  projekt_id: string
+  bezeichnung: string
+  status: PositionStatus
+  sortierung: number
   erledigt_am: string | null
   created_at: string
+}
+
+export const POSITION_STATUS: Record<PositionStatus, string> = {
+  offen: 'offen',
+  in_arbeit: 'in Arbeit',
+  erledigt: 'erledigt',
 }
 
 export interface Arbeitszeit {

@@ -1,24 +1,18 @@
-import { useState, type FormEvent } from 'react'
+import { useMemo, useState, type FormEvent } from 'react'
 import { supabase } from '../../lib/supabase'
-import type { Kunde, Projekt } from '../../lib/types'
-import { formatDatum } from '../../lib/format'
-import { heuteIso } from '../../lib/datum'
+import type { Kunde } from '../../lib/types'
+import { nameSchluessel } from '../../lib/format'
 import { useToast } from '../../components/Toast'
-import { useProfiles } from '../profile/ProfileProvider'
 import { useStammdaten } from '../stammdaten/StammdatenProvider'
-
-/** "seit 15.03.2026" bzw. "15.03.2026 – 27.07.2026" */
-function zeitraum(von: string, bis: string | null): string {
-  return bis ? `${formatDatum(von)} – ${formatDatum(bis)}` : `seit ${formatDatum(von)}`
-}
+import ProjekteDialog from './ProjekteDialog'
 
 export default function Kunden() {
   const toast = useToast()
   const { kunden, projekte, neuLaden } = useStammdaten()
 
   const [zeigeArchiv, setZeigeArchiv] = useState(false)
+  const [suche, setSuche] = useState('')
   const [bearbeiten, setBearbeiten] = useState<Kunde | null>(null)
-  const [archivieren, setArchivieren] = useState<Kunde | null>(null)
   const [projekteVon, setProjekteVon] = useState<Kunde | null>(null)
 
   // Formular „neuer Kunde"
@@ -29,14 +23,34 @@ export default function Kunden() {
   const [intern, setIntern] = useState(false)
   const [mitNummer, setMitNummer] = useState(true)
   const [nummerManuell, setNummerManuell] = useState('')
+  const [dubletten, setDubletten] = useState<Kunde[] | null>(null)
 
-  const sichtbar = kunden.filter((k) => k.archiviert === zeigeArchiv)
+  const suchbegriff = suche.trim().toLowerCase()
 
-  async function neuerKunde(e: FormEvent) {
-    e.preventDefault()
-    if (!name.trim()) return
+  /**
+   * Bei einer Suche werden aktive UND archivierte Kunden durchsucht – sonst
+   * legt man einen Kunden doppelt an, weil der alte im Archiv liegt.
+   */
+  const sichtbar = useMemo(() => {
+    if (!suchbegriff) return kunden.filter((k) => k.archiviert === zeigeArchiv)
+    return kunden.filter((k) =>
+      [k.name, k.ansprechpartner ?? '', k.kundennummer ?? '']
+        .join(' ')
+        .toLowerCase()
+        .includes(suchbegriff),
+    )
+  }, [kunden, zeigeArchiv, suchbegriff])
 
-    // Bestehende Kunden bringen ihre Nummer mit; neue bekommen eine erzeugt.
+  function findeDubletten(neuerName: string): Kunde[] {
+    const schluessel = nameSchluessel(neuerName)
+    if (!schluessel) return []
+    return kunden.filter((k) => {
+      const vorhanden = nameSchluessel(k.name)
+      return vorhanden === schluessel || vorhanden.includes(schluessel) || schluessel.includes(vorhanden)
+    })
+  }
+
+  async function anlegen() {
     let kundennummer: string | null = nummerManuell.trim() || null
     if (mitNummer) {
       const { data, error } = await supabase.rpc('next_nummer', {
@@ -65,20 +79,33 @@ export default function Kunden() {
     setTelefon('')
     setNummerManuell('')
     setIntern(false)
+    setDubletten(null)
     neuLaden()
   }
 
-  async function reaktivieren(k: Kunde) {
-    // Der Leistungszeitraum ist wieder offen, also Erledigungsdatum entfernen.
+  function neuerKunde(e: FormEvent) {
+    e.preventDefault()
+    if (!name.trim()) return
+
+    // Erst prüfen, ob es den Kunden schon gibt – auch im Archiv.
+    const treffer = findeDubletten(name)
+    if (treffer.length > 0 && dubletten === null) {
+      setDubletten(treffer)
+      return
+    }
+    anlegen()
+  }
+
+  async function archivWechseln(k: Kunde, archiv: boolean) {
     const { error } = await supabase
       .from('kunden')
-      .update({ archiviert: false, erledigt_am: null })
+      .update({ archiviert: archiv })
       .eq('id', k.id)
     if (error) {
       toast('Änderung fehlgeschlagen.', 'fehler')
       return
     }
-    toast('Kunde wieder aktiv.')
+    toast(archiv ? 'Kunde archiviert.' : 'Kunde wieder aktiv – Projekte sind wieder möglich.')
     neuLaden()
   }
 
@@ -86,13 +113,20 @@ export default function Kunden() {
     <div>
       <h1>Kunden &amp; Projekte</h1>
 
-      {!zeigeArchiv && (
+      {!zeigeArchiv && !suchbegriff && (
         <div className="card">
           <h2>Neuer Kunde</h2>
           <form className="form-grid" onSubmit={neuerKunde}>
             <label>
               Name*
-              <input value={name} onChange={(e) => setName(e.target.value)} required />
+              <input
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value)
+                  setDubletten(null)
+                }}
+                required
+              />
             </label>
             <label>
               Ansprechpartner
@@ -132,27 +166,76 @@ export default function Kunden() {
                 />
               </label>
             )}
+
+            {dubletten && dubletten.length > 0 && (
+              <div className="hinweis-warnung wide">
+                <strong>Gibt es diesen Kunden schon?</strong>
+                <ul className="dubletten-liste">
+                  {dubletten.map((k) => (
+                    <li key={k.id}>
+                      {k.kundennummer ?? 'ohne Nummer'} · {k.name}
+                      {k.archiviert && <span className="tag-intern">archiviert</span>}
+                    </li>
+                  ))}
+                </ul>
+                Ist es derselbe Kunde, brich hier ab – archivierte lassen sich über
+                „Reaktivieren" wieder öffnen.
+              </div>
+            )}
+
             <div className="form-actions">
               <button className="btn-primary" type="submit">
-                Kunde anlegen
+                {dubletten && dubletten.length > 0 ? 'Trotzdem anlegen' : 'Kunde anlegen'}
               </button>
             </div>
           </form>
         </div>
       )}
 
-      <div className="segmented">
-        <button className={!zeigeArchiv ? 'seg active' : 'seg'} onClick={() => setZeigeArchiv(false)}>
-          Aktive ({kunden.filter((k) => !k.archiviert).length})
-        </button>
-        <button className={zeigeArchiv ? 'seg active' : 'seg'} onClick={() => setZeigeArchiv(true)}>
-          Archiv ({kunden.filter((k) => k.archiviert).length})
-        </button>
+      <div className="such-zeile">
+        <input
+          className="suchfeld"
+          value={suche}
+          onChange={(e) => setSuche(e.target.value)}
+          placeholder="Kunde suchen (durchsucht auch das Archiv)…"
+        />
+        {suchbegriff && (
+          <button className="btn-ghost small" onClick={() => setSuche('')}>
+            Suche zurücksetzen
+          </button>
+        )}
       </div>
+
+      {!suchbegriff && (
+        <div className="segmented">
+          <button
+            className={!zeigeArchiv ? 'seg active' : 'seg'}
+            onClick={() => setZeigeArchiv(false)}
+          >
+            Aktive ({kunden.filter((k) => !k.archiviert).length})
+          </button>
+          <button
+            className={zeigeArchiv ? 'seg active' : 'seg'}
+            onClick={() => setZeigeArchiv(true)}
+          >
+            Archiv ({kunden.filter((k) => k.archiviert).length})
+          </button>
+        </div>
+      )}
+
+      {suchbegriff && (
+        <p className="muted small">
+          {sichtbar.length} Treffer für „{suche.trim()}" – aktive und archivierte Kunden.
+        </p>
+      )}
 
       {sichtbar.length === 0 ? (
         <p className="muted">
-          {zeigeArchiv ? 'Das Archiv ist leer.' : 'Noch keine Kunden angelegt.'}
+          {suchbegriff
+            ? 'Kein Kunde gefunden – dann ist der Name noch frei.'
+            : zeigeArchiv
+              ? 'Das Archiv ist leer.'
+              : 'Noch keine Kunden angelegt.'}
         </p>
       ) : (
         <div className="table-wrap">
@@ -162,7 +245,6 @@ export default function Kunden() {
                 <th>Kundennr.</th>
                 <th>Name</th>
                 <th>Kontakt</th>
-                <th>Zeitraum</th>
                 <th>Projekte</th>
                 <th></th>
               </tr>
@@ -179,6 +261,7 @@ export default function Kunden() {
                       <div>
                         {k.name}
                         {k.intern && <span className="tag-intern">intern</span>}
+                        {k.archiviert && <span className="tag-intern">archiviert</span>}
                       </div>
                       {k.ansprechpartner && (
                         <div className="muted small">{k.ansprechpartner}</div>
@@ -189,7 +272,6 @@ export default function Kunden() {
                       {k.telefon && <div className="kontakt-zeile nowrap">{k.telefon}</div>}
                       {!k.email && !k.telefon && '—'}
                     </td>
-                    <td className="nowrap">{zeitraum(k.angelegt_am, k.erledigt_am)}</td>
                     <td className="nowrap">
                       <button
                         className="btn-ghost small"
@@ -206,15 +288,12 @@ export default function Kunden() {
                         <button className="btn-ghost small" onClick={() => setBearbeiten(k)}>
                           Bearbeiten
                         </button>
-                        {k.archiviert ? (
-                          <button className="btn-ghost small" onClick={() => reaktivieren(k)}>
-                            Reaktivieren
-                          </button>
-                        ) : (
-                          <button className="btn-ghost small" onClick={() => setArchivieren(k)}>
-                            Archivieren
-                          </button>
-                        )}
+                        <button
+                          className="btn-ghost small"
+                          onClick={() => archivWechseln(k, !k.archiviert)}
+                        >
+                          {k.archiviert ? 'Reaktivieren' : 'Archivieren'}
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -240,78 +319,6 @@ export default function Kunden() {
           onGespeichert={neuLaden}
         />
       )}
-
-      {archivieren && (
-        <ArchivDialog
-          kunde={archivieren}
-          onSchliessen={() => setArchivieren(null)}
-          onGespeichert={neuLaden}
-        />
-      )}
-    </div>
-  )
-}
-
-/** Fragt beim Archivieren nach dem Ende des Leistungszeitraums. */
-function ArchivDialog({
-  kunde,
-  onSchliessen,
-  onGespeichert,
-}: {
-  kunde: Kunde
-  onSchliessen: () => void
-  onGespeichert: () => void
-}) {
-  const toast = useToast()
-  const [datum, setDatum] = useState(heuteIso())
-  const [speichert, setSpeichert] = useState(false)
-
-  async function archivieren() {
-    setSpeichert(true)
-    const { error } = await supabase
-      .from('kunden')
-      .update({ archiviert: true, erledigt_am: datum })
-      .eq('id', kunde.id)
-    setSpeichert(false)
-    if (error) {
-      toast('Archivieren fehlgeschlagen.', 'fehler')
-      return
-    }
-    toast('Kunde archiviert.')
-    onGespeichert()
-    onSchliessen()
-  }
-
-  return (
-    <div className="modal-hintergrund" onClick={onSchliessen}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>„{kunde.name}" archivieren</h2>
-        <p className="muted small">
-          Der Kunde verschwindet aus den Auswahllisten, gebuchte Zeiten bleiben
-          erhalten. Wann wurde die Zusammenarbeit abgeschlossen?
-        </p>
-
-        <label>
-          Erledigungsdatum
-          <input type="date" value={datum} onChange={(e) => setDatum(e.target.value)} />
-        </label>
-
-        <div className="muted small">
-          Leistungszeitraum: {formatDatum(kunde.angelegt_am)} – {formatDatum(datum)}
-        </div>
-
-        <div className="modal-aktionen">
-          <span />
-          <div className="modal-rechts">
-            <button className="btn-ghost" onClick={onSchliessen}>
-              Abbrechen
-            </button>
-            <button className="btn-primary" onClick={archivieren} disabled={speichert}>
-              {speichert ? 'Archiviert…' : 'Archivieren'}
-            </button>
-          </div>
-        </div>
-      </div>
     </div>
   )
 }
@@ -326,16 +333,12 @@ function KundeDialog({
   onGespeichert: () => void
 }) {
   const toast = useToast()
-  const { meinProfil } = useProfiles()
-  const istAdmin = meinProfil?.ist_admin ?? false
-
   const [name, setName] = useState(kunde.name)
   const [ansprech, setAnsprech] = useState(kunde.ansprechpartner ?? '')
   const [email, setEmail] = useState(kunde.email ?? '')
   const [telefon, setTelefon] = useState(kunde.telefon ?? '')
   const [nummer, setNummer] = useState(kunde.kundennummer ?? '')
   const [intern, setIntern] = useState(kunde.intern)
-  const [angelegt, setAngelegt] = useState(kunde.angelegt_am)
 
   const veraendert =
     name.trim() !== kunde.name ||
@@ -343,8 +346,7 @@ function KundeDialog({
     email.trim() !== (kunde.email ?? '') ||
     telefon.trim() !== (kunde.telefon ?? '') ||
     nummer.trim() !== (kunde.kundennummer ?? '') ||
-    intern !== kunde.intern ||
-    (istAdmin && angelegt !== kunde.angelegt_am)
+    intern !== kunde.intern
 
   async function speichern(e: FormEvent) {
     e.preventDefault()
@@ -357,9 +359,6 @@ function KundeDialog({
         telefon: telefon.trim() || null,
         kundennummer: nummer.trim() || null,
         intern,
-        // Nur Administratoren dürfen das Anlagedatum verschieben; die
-        // Datenbank weist es andernfalls ohnehin ab.
-        ...(istAdmin ? { angelegt_am: angelegt } : {}),
       })
       .eq('id', kunde.id)
     if (error) {
@@ -399,21 +398,6 @@ function KundeDialog({
             placeholder="z. B. K-00007"
           />
         </label>
-        <label>
-          Angelegt am {!istAdmin && <span className="muted small">(nur Administrator)</span>}
-          <input
-            type="date"
-            value={angelegt}
-            onChange={(e) => setAngelegt(e.target.value)}
-            disabled={!istAdmin}
-          />
-        </label>
-        {kunde.erledigt_am && (
-          <div className="muted small">
-            Erledigt am {formatDatum(kunde.erledigt_am)} – beim Reaktivieren wird das
-            Datum entfernt.
-          </div>
-        )}
         <label className="checkbox-inline">
           <input type="checkbox" checked={intern} onChange={(e) => setIntern(e.target.checked)} />
           Interner Kunde
@@ -435,190 +419,6 @@ function KundeDialog({
           </div>
         </div>
       </form>
-    </div>
-  )
-}
-
-/**
- * Projekte eines Kunden. Bewusst als Dialog: Vorher klappte die Liste unter
- * der Tabelle auf und lag dadurch außerhalb des sichtbaren Bereichs – es sah
- * aus, als würde der Klick nichts bewirken.
- */
-function ProjekteDialog({
-  kunde,
-  onSchliessen,
-  onGeaendert,
-}: {
-  kunde: Kunde
-  onSchliessen: () => void
-  onGeaendert: () => void
-}) {
-  const toast = useToast()
-  const { projekte } = useStammdaten()
-  const [name, setName] = useState('')
-  const [erledigt, setErledigt] = useState<Projekt | null>(null)
-
-  const eigene = projekte.filter((p) => p.kunde_id === kunde.id)
-
-  async function neu(e: FormEvent) {
-    e.preventDefault()
-    if (!name.trim()) return
-    const { error } = await supabase
-      .from('projekte')
-      .insert({ kunde_id: kunde.id, name: name.trim() })
-    if (error) {
-      toast('Projekt konnte nicht angelegt werden.', 'fehler')
-      return
-    }
-    toast(`Projekt „${name.trim()}" angelegt.`)
-    setName('')
-    onGeaendert()
-  }
-
-  async function reaktivieren(p: Projekt) {
-    await supabase
-      .from('projekte')
-      .update({ archiviert: false, erledigt_am: null })
-      .eq('id', p.id)
-    onGeaendert()
-  }
-
-  return (
-    <div className="modal-hintergrund" onClick={onSchliessen}>
-      <div className="modal breit" onClick={(e) => e.stopPropagation()}>
-        <h2>Projekte von „{kunde.name}"</h2>
-        <p className="muted small">
-          Wofür wurdet ihr beauftragt? Zum Beispiel „Visitenkartengestaltung"
-          oder „Flyergestaltung". Diese Projekte stehen dann in der Stoppuhr zur
-          Auswahl.
-        </p>
-
-        <form className="inline-form" onSubmit={neu}>
-          <input
-            placeholder="Neues Projekt…"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            autoFocus
-          />
-          <button className="btn-primary" type="submit" disabled={!name.trim()}>
-            Anlegen
-          </button>
-        </form>
-
-        {eigene.length === 0 ? (
-          <p className="muted">Noch keine Projekte für diesen Kunden.</p>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Projekt</th>
-                  <th>Angelegt / erledigt</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {eigene.map((p) => (
-                  <tr key={p.id}>
-                    <td className={p.archiviert ? 'muted' : ''}>
-                      {p.name}
-                      {p.archiviert && <span className="tag-intern">erledigt</span>}
-                    </td>
-                    <td className="nowrap">{zeitraum(p.angelegt_am, p.erledigt_am)}</td>
-                    <td className="spalte-aktionen">
-                      <div className="aktionen">
-                        {p.archiviert ? (
-                          <button className="btn-ghost small" onClick={() => reaktivieren(p)}>
-                            Wieder öffnen
-                          </button>
-                        ) : (
-                          <button className="btn-ghost small" onClick={() => setErledigt(p)}>
-                            ✓ Erledigt
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        <div className="modal-aktionen">
-          <span />
-          <div className="modal-rechts">
-            <button className="btn-primary" onClick={onSchliessen}>
-              Fertig
-            </button>
-          </div>
-        </div>
-
-        {erledigt && (
-          <ProjektArchivDialog
-            projekt={erledigt}
-            onSchliessen={() => setErledigt(null)}
-            onGespeichert={onGeaendert}
-          />
-        )}
-      </div>
-    </div>
-  )
-}
-
-function ProjektArchivDialog({
-  projekt,
-  onSchliessen,
-  onGespeichert,
-}: {
-  projekt: Projekt
-  onSchliessen: () => void
-  onGespeichert: () => void
-}) {
-  const toast = useToast()
-  const [datum, setDatum] = useState(heuteIso())
-
-  async function archivieren() {
-    const { error } = await supabase
-      .from('projekte')
-      .update({ archiviert: true, erledigt_am: datum })
-      .eq('id', projekt.id)
-    if (error) {
-      toast('Speichern fehlgeschlagen.', 'fehler')
-      return
-    }
-    toast('Projekt als erledigt markiert.')
-    onGespeichert()
-    onSchliessen()
-  }
-
-  return (
-    <div className="modal-hintergrund" onClick={onSchliessen}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>„{projekt.name}" als erledigt markieren</h2>
-        <p className="muted small">
-          Das Projekt verschwindet aus der Auswahl der Stoppuhr. Gebuchte Zeiten
-          bleiben erhalten und behalten ihre Zuordnung.
-        </p>
-        <label>
-          Erledigungsdatum
-          <input type="date" value={datum} onChange={(e) => setDatum(e.target.value)} />
-        </label>
-        <div className="muted small">
-          Leistungszeitraum: {formatDatum(projekt.angelegt_am)} – {formatDatum(datum)}
-        </div>
-        <div className="modal-aktionen">
-          <span />
-          <div className="modal-rechts">
-            <button className="btn-ghost" onClick={onSchliessen}>
-              Abbrechen
-            </button>
-            <button className="btn-primary" onClick={archivieren}>
-              Als erledigt markieren
-            </button>
-          </div>
-        </div>
-      </div>
     </div>
   )
 }
