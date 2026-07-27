@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { supabase } from '../../lib/supabase'
-import type { Kunde, Position, Projekt } from '../../lib/types'
+import type { Kunde, Position, Projekt, ProjektNotiz } from '../../lib/types'
 import { formatDatum, formatDauer, formatZeitstempel } from '../../lib/format'
 import { heuteIso } from '../../lib/datum'
 import { useToast } from '../../components/Toast'
@@ -8,6 +8,7 @@ import { useAuth } from '../auth/useAuth'
 import { useProfiles } from '../profile/ProfileProvider'
 import { useStammdaten } from '../stammdaten/StammdatenProvider'
 import PositionenDialog from './PositionenDialog'
+import NotizenDialog from './NotizenDialog'
 
 /** "K-00002-01" – aus der aktuellen Kundennummer zusammengesetzt. */
 export function projektNummer(kunde: Kunde | null, projekt: Projekt): string | null {
@@ -42,20 +43,27 @@ export default function ProjekteDialog({
   const [entfernen, setEntfernen] = useState<Projekt | null>(null)
   const [zeigePapierkorb, setZeigePapierkorb] = useState(false)
   const [positionenVon, setPositionenVon] = useState<Projekt | null>(null)
+  const [notizenVon, setNotizenVon] = useState<Projekt | null>(null)
   const [positionen, setPositionen] = useState<Position[]>([])
+  const [notizen, setNotizen] = useState<ProjektNotiz[]>([])
 
   const eigene = projekte.filter((p) => p.kunde_id === kunde.id)
   const imPapierkorb = geloeschteProjekte.filter((p) => p.kunde_id === kunde.id)
 
-  /** Positionen aller Projekte dieses Kunden – für die Fortschrittsanzeige. */
+  /** Positionen und Notizen aller Projekte dieses Kunden – für die Zähler. */
   const positionenLaden = useCallback(async () => {
     const ids = projekte.filter((p) => p.kunde_id === kunde.id).map((p) => p.id)
     if (ids.length === 0) {
       setPositionen([])
+      setNotizen([])
       return
     }
-    const { data } = await supabase.from('positionen').select('*').in('projekt_id', ids)
-    setPositionen((data as Position[]) ?? [])
+    const [{ data: pos }, { data: no }] = await Promise.all([
+      supabase.from('positionen').select('*').in('projekt_id', ids),
+      supabase.from('projekt_notizen').select('*').in('projekt_id', ids),
+    ])
+    setPositionen((pos as Position[]) ?? [])
+    setNotizen((no as ProjektNotiz[]) ?? [])
   }, [projekte, kunde.id])
 
   useEffect(() => {
@@ -148,6 +156,9 @@ export default function ProjekteDialog({
       onClick: () => wiederherstellen(p),
     })
   }
+
+  const anzahlNotizen = (projektId: string) =>
+    notizen.filter((n) => n.projekt_id === projektId).length
 
   function fortschritt(projektId: string): { erledigt: number; gesamt: number } {
     const eigene = positionen.filter((pos) => pos.projekt_id === projektId)
@@ -260,6 +271,7 @@ export default function ProjekteDialog({
                   <th>Projekt</th>
                   <th>Angelegt / erledigt</th>
                   <th>Positionen</th>
+                  <th>Notizen</th>
                   <th></th>
                 </tr>
               </thead>
@@ -282,6 +294,13 @@ export default function ProjekteDialog({
                           {f.gesamt === 0
                             ? '+ Positionen'
                             : `${f.erledigt} von ${f.gesamt} erledigt`}
+                        </button>
+                      </td>
+                      <td className="nowrap">
+                        <button className="btn-ghost small" onClick={() => setNotizenVon(p)}>
+                          {anzahlNotizen(p.id) === 0
+                            ? '+ Notiz'
+                            : `${anzahlNotizen(p.id)} Notizen`}
                         </button>
                       </td>
                       <td className="spalte-aktionen">
@@ -330,11 +349,21 @@ export default function ProjekteDialog({
           />
         )}
 
+        {notizenVon && (
+          <NotizenDialog
+            projekt={notizenVon}
+            kunde={kunde}
+            onSchliessen={() => setNotizenVon(null)}
+            onGeaendert={positionenLaden}
+          />
+        )}
+
         {entfernen && (
           <ProjektEntfernenDialog
             projekt={entfernen}
             kunde={kunde}
             positionen={positionen.filter((pos) => pos.projekt_id === entfernen.id).length}
+            notizen={anzahlNotizen(entfernen.id)}
             onSchliessen={() => setEntfernen(null)}
             onBestaetigt={() => {
               const p = entfernen
@@ -368,12 +397,14 @@ function ProjektEntfernenDialog({
   projekt,
   kunde,
   positionen,
+  notizen,
   onSchliessen,
   onBestaetigt,
 }: {
   projekt: Projekt
   kunde: Kunde
   positionen: number
+  notizen: number
   onSchliessen: () => void
   onBestaetigt: () => void
 }) {
@@ -434,6 +465,9 @@ function ProjektEntfernenDialog({
             {deadlines === 0
               ? 'Keine Deadline im Kalender'
               : `${deadlines} ${deadlines === 1 ? 'Deadline' : 'Deadlines'} im Kalender`}
+          </li>
+          <li>
+            {notizen === 0 ? 'Keine Notizen' : `${notizen} ${notizen === 1 ? 'Notiz' : 'Notizen'}`}
           </li>
         </ul>
 

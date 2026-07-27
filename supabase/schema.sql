@@ -86,6 +86,19 @@ create table if not exists public.positionen (
   created_at   timestamptz not null default now()
 );
 
+-- Notizen am Projekt: Absprachen, Zwischenstände, Hinweise fürs Team.
+-- Bewusst einzelne Einträge statt eines gemeinsamen Textfelds – nur so ist
+-- erkennbar, von wem eine Notiz stammt (Anzeige in der Farbe des Verfassers),
+-- und zwei Leute können nicht gegenseitig ihren Text überschreiben.
+create table if not exists public.projekt_notizen (
+  id          uuid primary key default gen_random_uuid(),
+  projekt_id  uuid not null references public.projekte (id) on delete cascade,
+  autor_id    uuid not null references auth.users (id) on delete cascade,
+  text        text not null,
+  created_at  timestamptz not null default now(),
+  geaendert_am timestamptz
+);
+
 create table if not exists public.arbeitszeiten (
   id                uuid primary key default gen_random_uuid(),
   gesellschafter_id uuid not null references auth.users (id) on delete cascade,
@@ -433,6 +446,7 @@ alter table public.termine         enable row level security;
 alter table public.nummernkreise   enable row level security;
 alter table public.nummern_log     enable row level security;
 alter table public.positionen      enable row level security;
+alter table public.projekt_notizen enable row level security;
 
 -- Alte Regeln entfernen, damit dieses Skript wiederholt ausführbar bleibt.
 do $$
@@ -462,6 +476,21 @@ grant select, insert, update, delete on public.termine to authenticated;
 create policy "positionen_all" on public.positionen
   for all to authenticated using (true) with check (true);
 grant select, insert, update, delete on public.positionen to authenticated;
+
+-- Projektnotizen: alle lesen mit, ändern und löschen darf jeder nur die
+-- eigenen. Sonst könnte man die Notiz eines anderen ändern, während sie
+-- weiterhin in dessen Farbe und unter dessen Namen steht.
+create policy "notizen_select" on public.projekt_notizen
+  for select to authenticated using (true);
+create policy "notizen_insert" on public.projekt_notizen
+  for insert to authenticated with check (autor_id = auth.uid());
+create policy "notizen_update" on public.projekt_notizen
+  for update to authenticated
+  using (autor_id = auth.uid())
+  with check (autor_id = auth.uid());
+create policy "notizen_delete" on public.projekt_notizen
+  for delete to authenticated using (autor_id = auth.uid());
+grant select, insert, update, delete on public.projekt_notizen to authenticated;
 
 -- Arbeitszeiten: alle sehen alles, bearbeiten nur die eigenen Einträge.
 create policy "zeiten_select" on public.arbeitszeiten
