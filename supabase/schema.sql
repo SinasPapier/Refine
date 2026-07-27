@@ -515,10 +515,24 @@ revoke update on public.stundensaetze from authenticated;
 revoke update on public.stundensaetze from anon;
 grant update (bezeichnung, satz) on public.stundensaetze to authenticated;
 
--- Nummern-Protokoll: nur lesen. Einträge entstehen ausschließlich über
--- next_nummer und bleiben damit revisionssicher.
+-- Nummern-Protokoll: Einträge entstehen ausschließlich über next_nummer.
+-- Nachträglich ist nur die Notiz änderbar – Nummer, Typ und Zeitpunkt bleiben
+-- stehen, sonst wäre die Dokumentation wertlos. Der Spaltenzuschnitt ist der
+-- entscheidende Teil: ohne ihn ließe sich über die API auch "nummer"
+-- überschreiben.
 create policy "log_select" on public.nummern_log
   for select to authenticated using (true);
+create policy "log_update" on public.nummern_log
+  for update to authenticated using (true) with check (true);
+revoke update on public.nummern_log from authenticated;
+revoke update on public.nummern_log from anon;
+grant update (notiz) on public.nummern_log to authenticated;
+
+-- Löschen nur für Administratoren – wie schon bei Zähler und Format. Ein
+-- gelöschter Eintrag ist nicht wiederherstellbar, und die Nummer selbst steht
+-- zu dem Zeitpunkt meist schon auf einer Rechnung.
+create policy "log_delete" on public.nummern_log
+  for delete to authenticated using (public.ist_admin());
 
 -- Nummernkreise: lesen alle; Format und Zähler nur Administratoren. So lassen
 -- sich bestehende Nummern einpflegen, ohne dass jemand die Nummernfolge

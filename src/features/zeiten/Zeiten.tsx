@@ -24,10 +24,16 @@ export default function Zeiten() {
   const [filterBis, setFilterBis] = useState('')
 
   const laden = useCallback(async () => {
+    // Neuester Eintrag oben. Innerhalb eines Tages entscheidet die Startzeit;
+    // von Hand erfasste Einträge haben keine und stehen daher dahinter, dort
+    // sortiert der Anlagezeitpunkt. Ohne diese dritte Stufe stünden zwei
+    // Handeinträge desselben Tages in beliebiger Reihenfolge.
     const { data } = await supabase
       .from('arbeitszeiten')
       .select('*')
       .order('datum', { ascending: false })
+      .order('start_zeit', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false })
       .limit(500)
     setZeiten((data as Arbeitszeit[]) ?? [])
   }, [])

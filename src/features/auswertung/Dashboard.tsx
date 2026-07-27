@@ -7,12 +7,14 @@ import { formatDatum } from '../../lib/format'
 import { heuteIso, isoDatum } from '../../lib/datum'
 import { useProfiles } from '../profile/ProfileProvider'
 import { useStammdaten } from '../stammdaten/StammdatenProvider'
+import { projektNummer } from '../kunden/ProjekteDialog'
 
 type Zeitraum = 'monat' | 'jahr' | 'alle'
 
 export default function Dashboard() {
   const { profiles, nameVon, farbeVon } = useProfiles()
-  const { kunden, kundeVonProjekt, projektLabel, projekte } = useStammdaten()
+  const { kunden, kundeVonProjekt, projektLabel, projekte, terminSichtbar } =
+    useStammdaten()
   const [zeiten, setZeiten] = useState<Arbeitszeit[]>([])
   const [laufende, setLaufende] = useState<LaufendeZeit[]>([])
   const [termine, setTermine] = useState<Termin[]>([])
@@ -23,14 +25,16 @@ export default function Dashboard() {
     Promise.all([
       supabase.from('arbeitszeiten').select('*'),
       supabase.from('laufende_zeiten').select('*'),
-      // Offene Deadlines ab heute, die nächsten zuerst.
+      // Offene Deadlines ab heute, die nächsten zuerst. Bewusst mehr als die
+      // angezeigten fünf: Deadlines erledigter Projekte fallen gleich noch
+      // weg, sonst blieben am Ende weniger als fünf übrig.
       supabase
         .from('termine')
         .select('*')
         .eq('erledigt', false)
         .gte('datum', heuteIso())
         .order('datum')
-        .limit(5),
+        .limit(40),
       // Was steht noch an? Offene Positionen laufender Projekte.
       supabase.from('positionen').select('*').neq('status', 'erledigt'),
     ]).then(([z, l, t, pos]) => {
@@ -75,6 +79,45 @@ export default function Dashboard() {
     if (id === '—') return 'Ohne Projekt/Kunde'
     return kunden.find((k) => k.id === id)?.name ?? 'Unbekannt'
   }
+
+  /** Deadlines erledigter oder entfernter Projekte gehören nicht mehr her. */
+  const naechsteTermine = useMemo(
+    () => termine.filter((t) => terminSichtbar(t.projekt_id)).slice(0, 5),
+    [termine, terminSichtbar],
+  )
+
+  /**
+   * Offene Positionen, gruppiert: aktiver Kunde → Projekt → Positionen.
+   * Nur was wirklich offen ist – ein Kunde ohne offene Punkte taucht nicht auf.
+   */
+  const offeneGruppen = useMemo(() => {
+    const jeProjekt = new Map<string, Position[]>()
+    for (const pos of positionen) {
+      const liste = jeProjekt.get(pos.projekt_id) ?? []
+      liste.push(pos)
+      jeProjekt.set(pos.projekt_id, liste)
+    }
+
+    return kunden
+      .filter((k) => !k.archiviert)
+      .map((kunde) => {
+        const eigene = projekte
+          .filter((p) => p.kunde_id === kunde.id && !p.archiviert)
+          .map((projekt) => ({
+            projekt,
+            // Sortierung wie im Projektdialog, damit die Reihenfolge vertraut ist.
+            positionen: (jeProjekt.get(projekt.id) ?? [])
+              .slice()
+              .sort((a, b) => a.sortierung - b.sortierung),
+          }))
+          .filter((p) => p.positionen.length > 0)
+        const offen = eigene.reduce((s, p) => s + p.positionen.length, 0)
+        return { kunde, projekte: eigene, offen }
+      })
+      .filter((g) => g.offen > 0)
+  }, [kunden, projekte, positionen])
+
+  const offenGesamt = offeneGruppen.reduce((s, g) => s + g.offen, 0)
 
   return (
     <div>
@@ -122,11 +165,11 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {termine.length > 0 && (
+      {naechsteTermine.length > 0 && (
         <div className="card">
           <h2>Nächste Deadlines</h2>
           <ul className="deadline-liste">
-            {termine.map((t) => (
+            {naechsteTermine.map((t) => (
               <li key={t.id}>
                 <span className="deadline-datum">{formatDatum(t.datum)}</span>
                 <span className="deadline-titel">{t.titel}</span>
@@ -139,26 +182,49 @@ export default function Dashboard() {
         </div>
       )}
 
-      {positionen.length > 0 && (
+      {offeneGruppen.length > 0 && (
         <div className="card">
-          <h2>Was ist noch offen</h2>
-          <ul className="deadline-liste">
-            {positionen
-              .filter((pos) => {
-                const proj = projekte.find((p) => p.id === pos.projekt_id)
-                return proj && !proj.archiviert
-              })
-              .slice(0, 8)
-              .map((pos) => (
-                <li key={pos.id}>
-                  <span className={`status-chip ${pos.status} klein`}>
-                    {POSITION_STATUS[pos.status]}
-                  </span>
-                  <span className="deadline-titel">{pos.bezeichnung}</span>
-                  <span className="muted small">{projektLabel(pos.projekt_id)}</span>
-                </li>
-              ))}
-          </ul>
+          <h2>
+            Was ist noch offen{' '}
+            <span className="muted small">
+              ({offenGesamt} {offenGesamt === 1 ? 'Punkt' : 'Punkte'})
+            </span>
+          </h2>
+          {/* Zugeklappt gestartet, damit die Karte kurz bleibt; die Zahl rechts
+              zeigt, ob sich das Aufklappen lohnt. */}
+          <div className="offen-baum">
+            {offeneGruppen.map((gruppe) => (
+              <details key={gruppe.kunde.id} className="offen-kunde">
+                <summary>
+                  <span className="offen-name">{gruppe.kunde.name}</span>
+                  <span className="offen-zahl">{gruppe.offen} offen</span>
+                </summary>
+                {gruppe.projekte.map(({ projekt, positionen: pos }) => (
+                  <details key={projekt.id} className="offen-projekt">
+                    <summary>
+                      <span className="offen-name">
+                        {projektNummer(gruppe.kunde, projekt) && (
+                          <code>{projektNummer(gruppe.kunde, projekt)}</code>
+                        )}{' '}
+                        {projekt.name}
+                      </span>
+                      <span className="offen-zahl">{pos.length} offen</span>
+                    </summary>
+                    <ul className="offen-positionen">
+                      {pos.map((p) => (
+                        <li key={p.id}>
+                          <span className={`status-chip ${p.status} klein`}>
+                            {POSITION_STATUS[p.status]}
+                          </span>
+                          <span>{p.bezeichnung}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                ))}
+              </details>
+            ))}
+          </div>
         </div>
       )}
 

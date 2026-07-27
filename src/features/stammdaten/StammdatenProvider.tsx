@@ -37,6 +37,9 @@ interface StammdatenState {
   istInternesProjekt: (projektId: string | null) => boolean
   /** Nicht archivierte Projekte eines Kunden – für die Auswahl-Kaskade. */
   projekteVonKunde: (kundeId: string) => Projekt[]
+  /** Gehört eine Deadline noch angezeigt? Nein, wenn ihr Projekt erledigt
+   *  oder im Papierkorb ist. Termine ohne Projekt bleiben immer sichtbar. */
+  terminSichtbar: (projektId: string | null) => boolean
 }
 
 const leer: StammdatenState = {
@@ -55,6 +58,7 @@ const leer: StammdatenState = {
   bezeichnungVon: () => '—',
   istInternesProjekt: () => false,
   projekteVonKunde: () => [],
+  terminSichtbar: () => true,
 }
 
 const StammdatenContext = createContext<StammdatenState>(leer)
@@ -157,6 +161,16 @@ export function StammdatenProvider({ children }: { children: ReactNode }) {
     const projekteVonKunde = (kundeId: string) =>
       projekte.filter((p) => p.kunde_id === kundeId && !p.archiviert)
 
+    // Eine Deadline ohne Projekt gilt immer. Sonst zählt der Zustand des
+    // Projekts: erledigt oder im Papierkorb heißt, die Frist ist gegenstandslos.
+    // Bewusst nur eine Anzeigeregel – wird das Projekt wieder geöffnet oder aus
+    // dem Papierkorb geholt, steht die Deadline wieder im Kalender.
+    const terminSichtbar = (projektId: string | null) => {
+      if (!projektId) return true
+      const proj = projekte.find((p) => p.id === projektId)
+      return proj ? !proj.archiviert : false
+    }
+
     return {
       kunden,
       projekte,
@@ -173,6 +187,7 @@ export function StammdatenProvider({ children }: { children: ReactNode }) {
       bezeichnungVon,
       istInternesProjekt,
       projekteVonKunde,
+      terminSichtbar,
     }
   }, [kunden, alleProjekte, saetze, laden, neuLaden])
 
