@@ -65,6 +65,11 @@ create table if not exists public.projekte (
   -- entsteht aus der AKTUELLEN Kundennummer, damit eine spätere Korrektur der
   -- Kundennummer nicht zu veralteten Projektnummern führt.
   lfd_nummer   integer,
+  -- Entfernte Projekte werden nur ausgeblendet, nicht gelöscht: an ihnen
+  -- hängen gebuchte Zeiten, deren Zuordnung ein echtes "delete" unwiderruflich
+  -- kappen würde (on delete set null). So bleibt das Zurückholen ein update.
+  geloescht_am  timestamptz,
+  geloescht_von uuid references public.profile (id),
   created_at   timestamptz not null default now()
 );
 
@@ -177,6 +182,12 @@ alter table public.projekte add column if not exists lfd_nummer  integer;
 update public.projekte set angelegt_am = created_at::date where angelegt_am is null;
 alter table public.projekte alter column angelegt_am set default current_date;
 alter table public.projekte alter column angelegt_am set not null;
+
+-- Papierkorb für Projekte. Bewusst ein Zeitstempel und keine Kennzeichnung:
+-- so lässt sich der Papierkorb nach Aktualität sortieren und es ist
+-- nachvollziehbar, wer wann etwas entfernt hat.
+alter table public.projekte add column if not exists geloescht_am  timestamptz;
+alter table public.projekte add column if not exists geloescht_von uuid references public.profile (id);
 
 -- Am Kunden wieder entfernt: für die Dokumentation zählt der Zeitraum des
 -- Auftrags, nicht der der Kundenbeziehung.
@@ -321,6 +332,9 @@ begin
 
   perform 1 from public.kunden where id = p_kunde_id for update;
 
+  -- Bewusst ohne Filter auf geloescht_am: eine einmal vergebene Projektnummer
+  -- darf kein zweites Mal herauskommen, sonst läge "K-00002-02" doppelt in der
+  -- Ablage.
   select coalesce(max(lfd_nummer), 0) + 1
     into v_naechste
     from public.projekte

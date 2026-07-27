@@ -242,6 +242,30 @@ button {
   color: var(--danger);
   border-color: #f3c9c9;
 }
+/* Nur für den bestätigenden Klick im Entfernen-Dialog. */
+.btn-danger {
+  background: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  padding: 8px 14px;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-danger:hover {
+  background: #b91c1c;
+}
+
+/* Was am Projekt hängt – im Entfernen-Dialog. */
+.entfernen-liste {
+  margin: 4px 0 2px;
+  padding-left: 20px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.entfernen-liste li {
+  margin: 3px 0;
+}
 
 /* ---------- Tabellen ---------- */
 .table-wrap {
@@ -468,12 +492,30 @@ th {
   z-index: 100;
 }
 .toast {
+  display: flex;
+  align-items: center;
+  gap: 14px;
   padding: 11px 16px;
   border-radius: 9px;
   color: #fff;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
   font-size: 0.9rem;
   animation: toast-in 0.18s ease-out;
+}
+/* Der Rückgängig-Knopf im Hinweis. */
+.toast-aktion {
+  flex: none;
+  padding: 4px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.toast-aktion:hover {
+  background: rgba(255, 255, 255, 0.16);
 }
 .toast-ok {
   background: #1f2937;

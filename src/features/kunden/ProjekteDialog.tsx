@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { supabase } from '../../lib/supabase'
 import type { Kunde, Position, Projekt } from '../../lib/types'
-import { formatDatum } from '../../lib/format'
+import { formatDatum, formatDauer, formatZeitstempel } from '../../lib/format'
 import { heuteIso } from '../../lib/datum'
 import { useToast } from '../../components/Toast'
 import { useAuth } from '../auth/useAuth'
+import { useProfiles } from '../profile/ProfileProvider'
 import { useStammdaten } from '../stammdaten/StammdatenProvider'
 import PositionenDialog from './PositionenDialog'
 
@@ -30,17 +31,21 @@ export default function ProjekteDialog({
 }) {
   const toast = useToast()
   const { session } = useAuth()
-  const { projekte } = useStammdaten()
+  const { nameVon } = useProfiles()
+  const { projekte, geloeschteProjekte } = useStammdaten()
 
   const [name, setName] = useState('')
   const [mitDeadline, setMitDeadline] = useState(false)
   const [deadline, setDeadline] = useState(heuteIso())
   const [speichert, setSpeichert] = useState(false)
   const [erledigt, setErledigt] = useState<Projekt | null>(null)
+  const [entfernen, setEntfernen] = useState<Projekt | null>(null)
+  const [zeigePapierkorb, setZeigePapierkorb] = useState(false)
   const [positionenVon, setPositionenVon] = useState<Projekt | null>(null)
   const [positionen, setPositionen] = useState<Position[]>([])
 
   const eigene = projekte.filter((p) => p.kunde_id === kunde.id)
+  const imPapierkorb = geloeschteProjekte.filter((p) => p.kunde_id === kunde.id)
 
   /** Positionen aller Projekte dieses Kunden – für die Fortschrittsanzeige. */
   const positionenLaden = useCallback(async () => {
@@ -106,6 +111,44 @@ export default function ProjekteDialog({
     onGeaendert()
   }
 
+  /** Zurück aus dem Papierkorb – aus dem Hinweis wie aus der Liste. */
+  const wiederherstellen = useCallback(
+    async (p: Projekt) => {
+      const { error } = await supabase
+        .from('projekte')
+        .update({ geloescht_am: null, geloescht_von: null })
+        .eq('id', p.id)
+      if (error) {
+        toast('Wiederherstellen fehlgeschlagen.', 'fehler')
+        return
+      }
+      toast(`Projekt „${p.name}" ist wieder da.`)
+      onGeaendert()
+    },
+    [toast, onGeaendert],
+  )
+
+  /** Kein echtes delete: die Zeile bleibt, damit gebuchte Zeiten ihre
+   *  Zuordnung behalten und der Undo-Knopf halten kann, was er verspricht. */
+  async function inDenPapierkorb(p: Projekt) {
+    const { error } = await supabase
+      .from('projekte')
+      .update({
+        geloescht_am: new Date().toISOString(),
+        geloescht_von: session?.user.id ?? null,
+      })
+      .eq('id', p.id)
+    if (error) {
+      toast('Entfernen fehlgeschlagen.', 'fehler')
+      return
+    }
+    onGeaendert()
+    toast(`Projekt „${p.name}" entfernt.`, 'ok', {
+      text: 'Rückgängig',
+      onClick: () => wiederherstellen(p),
+    })
+  }
+
   function fortschritt(projektId: string): { erledigt: number; gesamt: number } {
     const eigene = positionen.filter((pos) => pos.projekt_id === projektId)
     return {
@@ -151,7 +194,62 @@ export default function ProjekteDialog({
           </button>
         </form>
 
-        {eigene.length === 0 ? (
+        {/* Fällt nur auf, wenn wirklich etwas im Papierkorb liegt. */}
+        {imPapierkorb.length > 0 && (
+          <div className="segmented">
+            <button
+              className={!zeigePapierkorb ? 'seg active' : 'seg'}
+              onClick={() => setZeigePapierkorb(false)}
+            >
+              Projekte ({eigene.length})
+            </button>
+            <button
+              className={zeigePapierkorb ? 'seg active' : 'seg'}
+              onClick={() => setZeigePapierkorb(true)}
+            >
+              Papierkorb ({imPapierkorb.length})
+            </button>
+          </div>
+        )}
+
+        {zeigePapierkorb ? (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Nr.</th>
+                  <th>Projekt</th>
+                  <th>Entfernt</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {imPapierkorb.map((p) => (
+                  <tr key={p.id}>
+                    <td className="nowrap">
+                      <code>{projektNummer(kunde, p) ?? '—'}</code>
+                    </td>
+                    <td className="muted">{p.name}</td>
+                    <td className="nowrap muted small">
+                      {p.geloescht_am ? formatZeitstempel(p.geloescht_am) : '—'}
+                      {p.geloescht_von && <> · {nameVon(p.geloescht_von)}</>}
+                    </td>
+                    <td className="spalte-aktionen">
+                      <div className="aktionen">
+                        <button
+                          className="btn-ghost small"
+                          onClick={() => wiederherstellen(p)}
+                        >
+                          Wiederherstellen
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : eigene.length === 0 ? (
           <p className="muted">Noch keine Projekte für diesen Kunden.</p>
         ) : (
           <div className="table-wrap">
@@ -197,6 +295,13 @@ export default function ProjekteDialog({
                               ✓ Erledigt
                             </button>
                           )}
+                          <button
+                            className="btn-ghost small danger"
+                            onClick={() => setEntfernen(p)}
+                            title="Projekt in den Papierkorb legen"
+                          >
+                            Entfernen
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -225,6 +330,20 @@ export default function ProjekteDialog({
           />
         )}
 
+        {entfernen && (
+          <ProjektEntfernenDialog
+            projekt={entfernen}
+            kunde={kunde}
+            positionen={positionen.filter((pos) => pos.projekt_id === entfernen.id).length}
+            onSchliessen={() => setEntfernen(null)}
+            onBestaetigt={() => {
+              const p = entfernen
+              setEntfernen(null)
+              inDenPapierkorb(p)
+            }}
+          />
+        )}
+
         {erledigt && (
           <ProjektErledigtDialog
             projekt={erledigt}
@@ -236,6 +355,109 @@ export default function ProjekteDialog({
             onGespeichert={onGeaendert}
           />
         )}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Die zweite Bestätigung. Sie fragt nicht nur "sicher?", sondern beziffert,
+ * was am Projekt hängt – erst damit lässt sich die Frage beantworten.
+ */
+function ProjektEntfernenDialog({
+  projekt,
+  kunde,
+  positionen,
+  onSchliessen,
+  onBestaetigt,
+}: {
+  projekt: Projekt
+  kunde: Kunde
+  positionen: number
+  onSchliessen: () => void
+  onBestaetigt: () => void
+}) {
+  const [minuten, setMinuten] = useState<number | null>(null)
+  const [buchungen, setBuchungen] = useState(0)
+  const [deadlines, setDeadlines] = useState(0)
+
+  useEffect(() => {
+    let aktuell = true
+    ;(async () => {
+      const [{ data: zeiten }, { count: termine }] = await Promise.all([
+        supabase.from('arbeitszeiten').select('dauer_minuten').eq('projekt_id', projekt.id),
+        supabase
+          .from('termine')
+          .select('id', { count: 'exact', head: true })
+          .eq('projekt_id', projekt.id),
+      ])
+      if (!aktuell) return
+      const liste = (zeiten as { dauer_minuten: number }[]) ?? []
+      setBuchungen(liste.length)
+      setMinuten(liste.reduce((s, z) => s + z.dauer_minuten, 0))
+      setDeadlines(termine ?? 0)
+    })()
+    return () => {
+      aktuell = false
+    }
+  }, [projekt.id])
+
+  const nummer = projektNummer(kunde, projekt)
+  const hatZeiten = buchungen > 0
+
+  return (
+    <div className="modal-hintergrund" onClick={onSchliessen}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h2>
+          {nummer && <code>{nummer}</code>} „{projekt.name}" entfernen?
+        </h2>
+        <p className="muted small">
+          Das Projekt wandert in den Papierkorb: Es verschwindet aus allen
+          Listen und aus der Auswahl der Stoppuhr, bleibt aber wiederherstellbar
+          – sofort über „Rückgängig" und später über den Papierkorb.
+        </p>
+
+        <ul className="entfernen-liste">
+          <li>
+            {minuten === null
+              ? 'Gebuchte Zeit wird geprüft…'
+              : hatZeiten
+                ? `${buchungen} ${buchungen === 1 ? 'Buchung' : 'Buchungen'} · ${formatDauer(minuten)}`
+                : 'Keine gebuchte Zeit'}
+          </li>
+          <li>
+            {positionen === 0
+              ? 'Keine Positionen'
+              : `${positionen} ${positionen === 1 ? 'Position' : 'Positionen'}`}
+          </li>
+          <li>
+            {deadlines === 0
+              ? 'Keine Deadline im Kalender'
+              : `${deadlines} ${deadlines === 1 ? 'Deadline' : 'Deadlines'} im Kalender`}
+          </li>
+        </ul>
+
+        {hatZeiten && (
+          <div className="hinweis-warnung">
+            Auf dieses Projekt wurde bereits gearbeitet. Die gebuchten Stunden
+            bleiben in der Abrechnung erhalten und behalten ihren Projektnamen.
+            Für ein tatsächlich bearbeitetes Projekt ist aber
+            <strong> „✓ Erledigt"</strong> die richtige Wahl – „Entfernen" ist
+            für Projekte gedacht, die es so nie gab.
+          </div>
+        )}
+
+        <div className="modal-aktionen">
+          <span />
+          <div className="modal-rechts">
+            <button className="btn-ghost" onClick={onSchliessen}>
+              Abbrechen
+            </button>
+            <button className="btn-danger" onClick={onBestaetigt}>
+              Projekt entfernen
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   )
