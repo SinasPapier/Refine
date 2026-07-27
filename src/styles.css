@@ -1251,3 +1251,11 @@ th.nowrap {
   border-radius: 8px;
   font-size: 0.9rem;
 }
+
+/* Kaskade Kunde -> Projekt -> Tätigkeit in der Stoppuhr-Leiste */
+.timer-kunde { max-width: 220px; }
+.timer-hinweis {
+  flex-basis: 100%;
+  font-size: 0.82rem;
+  color: #92400e;
+}

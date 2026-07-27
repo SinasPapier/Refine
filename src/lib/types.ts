@@ -22,6 +22,10 @@ export interface Kunde {
   notiz: string | null
   intern: boolean
   archiviert: boolean
+  /** Beginn des Leistungszeitraums – nur Administratoren dürfen ihn ändern. */
+  angelegt_am: string
+  /** Ende des Leistungszeitraums, wird beim Archivieren gesetzt. */
+  erledigt_am: string | null
   created_at: string
 }
 
@@ -32,6 +36,8 @@ export interface Projekt {
   beschreibung: string | null
   status: string
   archiviert: boolean
+  angelegt_am: string
+  erledigt_am: string | null
   created_at: string
 }
 

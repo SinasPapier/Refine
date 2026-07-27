@@ -48,6 +48,9 @@ create table if not exists public.kunden (
   -- Interne Kunden belegen die Tätigkeit automatisch mit "Internes" vor.
   intern          boolean not null default false,
   archiviert      boolean not null default false,
+  -- Leistungszeitraum: Beginn entsteht automatisch, Ende beim Archivieren.
+  angelegt_am     date not null default current_date,
+  erledigt_am     date,
   created_at      timestamptz not null default now()
 );
 
@@ -58,6 +61,9 @@ create table if not exists public.projekte (
   beschreibung text,
   status       text not null default 'aktiv',
   archiviert   boolean not null default false,
+  -- Leistungszeitraum des Auftrags.
+  angelegt_am  date not null default current_date,
+  erledigt_am  date,
   created_at   timestamptz not null default now()
 );
 
@@ -148,6 +154,19 @@ alter table public.arbeitszeiten  add column if not exists end_zeit          tim
 alter table public.arbeitszeiten  add column if not exists taetigkeit        text;
 alter table public.arbeitszeiten  add column if not exists stundensatz       numeric;
 alter table public.laufende_zeiten add column if not exists taetigkeit       text;
+
+-- Leistungszeitraum nachrüsten: Bestandsdaten bekommen ihr Anlagedatum aus
+-- dem technischen Anlagezeitpunkt, damit nichts leer bleibt.
+alter table public.kunden   add column if not exists angelegt_am date;
+alter table public.kunden   add column if not exists erledigt_am date;
+alter table public.projekte add column if not exists angelegt_am date;
+alter table public.projekte add column if not exists erledigt_am date;
+update public.kunden   set angelegt_am = created_at::date where angelegt_am is null;
+update public.projekte set angelegt_am = created_at::date where angelegt_am is null;
+alter table public.kunden   alter column angelegt_am set default current_date;
+alter table public.projekte alter column angelegt_am set default current_date;
+alter table public.kunden   alter column angelegt_am set not null;
+alter table public.projekte alter column angelegt_am set not null;
 
 -- Nicht mehr benötigt: Sätze hängen an der Tätigkeit, nicht am Kunden bzw.
 -- an der Person.
@@ -296,6 +315,38 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+-- Das Anlagedatum ist Teil des dokumentierten Leistungszeitraums und soll
+-- nicht beiläufig verändert werden. Spaltenrechte scheiden aus, weil die Rolle
+-- "authenticated" auch Administratoren umfasst – ein Trigger kann dagegen
+-- ist_admin() auswerten.
+create or replace function public.schuetze_angelegt_am()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.angelegt_am is distinct from old.angelegt_am
+     -- auth.uid() ist null bei direktem Zugriff über den SQL-Editor; dort soll
+     -- eine Korrektur im Notfall weiterhin möglich sein.
+     and auth.uid() is not null
+     and not public.ist_admin() then
+    raise exception 'Das Anlagedatum darf nur ein Administrator ändern';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists schuetze_angelegt_am_kunden on public.kunden;
+create trigger schuetze_angelegt_am_kunden
+  before update on public.kunden
+  for each row execute function public.schuetze_angelegt_am();
+
+drop trigger if exists schuetze_angelegt_am_projekte on public.projekte;
+create trigger schuetze_angelegt_am_projekte
+  before update on public.projekte
+  for each row execute function public.schuetze_angelegt_am();
 
 
 -- ############################################################################

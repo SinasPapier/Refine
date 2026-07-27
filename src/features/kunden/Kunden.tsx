@@ -1,16 +1,25 @@
 import { useState, type FormEvent } from 'react'
 import { supabase } from '../../lib/supabase'
-import type { Kunde } from '../../lib/types'
+import type { Kunde, Projekt } from '../../lib/types'
+import { formatDatum } from '../../lib/format'
+import { heuteIso } from '../../lib/datum'
 import { useToast } from '../../components/Toast'
+import { useProfiles } from '../profile/ProfileProvider'
 import { useStammdaten } from '../stammdaten/StammdatenProvider'
+
+/** "seit 15.03.2026" bzw. "15.03.2026 – 27.07.2026" */
+function zeitraum(von: string, bis: string | null): string {
+  return bis ? `${formatDatum(von)} – ${formatDatum(bis)}` : `seit ${formatDatum(von)}`
+}
 
 export default function Kunden() {
   const toast = useToast()
   const { kunden, projekte, neuLaden } = useStammdaten()
 
-  const [ausgewaehlt, setAusgewaehlt] = useState<string | null>(null)
   const [zeigeArchiv, setZeigeArchiv] = useState(false)
   const [bearbeiten, setBearbeiten] = useState<Kunde | null>(null)
+  const [archivieren, setArchivieren] = useState<Kunde | null>(null)
+  const [projekteVon, setProjekteVon] = useState<Kunde | null>(null)
 
   // Formular „neuer Kunde"
   const [name, setName] = useState('')
@@ -59,17 +68,17 @@ export default function Kunden() {
     neuLaden()
   }
 
-  async function archivieren(k: Kunde, archiv: boolean) {
+  async function reaktivieren(k: Kunde) {
+    // Der Leistungszeitraum ist wieder offen, also Erledigungsdatum entfernen.
     const { error } = await supabase
       .from('kunden')
-      .update({ archiviert: archiv })
+      .update({ archiviert: false, erledigt_am: null })
       .eq('id', k.id)
     if (error) {
       toast('Änderung fehlgeschlagen.', 'fehler')
       return
     }
-    toast(archiv ? 'Kunde archiviert.' : 'Kunde wieder aktiv.')
-    if (ausgewaehlt === k.id) setAusgewaehlt(null)
+    toast('Kunde wieder aktiv.')
     neuLaden()
   }
 
@@ -119,7 +128,7 @@ export default function Kunden() {
                 <input
                   value={nummerManuell}
                   onChange={(e) => setNummerManuell(e.target.value)}
-                  placeholder="z. B. K-0007"
+                  placeholder="z. B. K-00007"
                 />
               </label>
             )}
@@ -152,63 +161,75 @@ export default function Kunden() {
               <tr>
                 <th>Kundennr.</th>
                 <th>Name</th>
-                <th>Ansprechpartner</th>
                 <th>Kontakt</th>
+                <th>Zeitraum</th>
                 <th>Projekte</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {sichtbar.map((k) => (
-                <tr key={k.id}>
-                  <td className="nowrap">
-                    <code>{k.kundennummer ?? '—'}</code>
-                  </td>
-                  <td>
-                    {k.name}
-                    {k.intern && <span className="tag-intern">intern</span>}
-                  </td>
-                  <td>{k.ansprechpartner ?? '—'}</td>
-                  <td className="spalte-kontakt">
-                    {k.email && <div className="kontakt-zeile">{k.email}</div>}
-                    {k.telefon && <div className="kontakt-zeile nowrap">{k.telefon}</div>}
-                    {!k.email && !k.telefon && '—'}
-                  </td>
-                  <td className="nowrap">
-                    <button
-                      className="link-knopf"
-                      onClick={() => setAusgewaehlt(ausgewaehlt === k.id ? null : k.id)}
-                    >
-                      {(() => {
-                        const n = projekte.filter((p) => p.kunde_id === k.id).length
-                        return `${n} ${n === 1 ? 'Projekt' : 'Projekte'}`
-                      })()}
-                    </button>
-                  </td>
-                  <td className="spalte-aktionen">
-                    <div className="aktionen">
-                      <button className="btn-ghost small" onClick={() => setBearbeiten(k)}>
-                        Bearbeiten
-                      </button>
+              {sichtbar.map((k) => {
+                const anzahl = projekte.filter((p) => p.kunde_id === k.id).length
+                return (
+                  <tr key={k.id}>
+                    <td className="nowrap">
+                      <code>{k.kundennummer ?? '—'}</code>
+                    </td>
+                    <td>
+                      <div>
+                        {k.name}
+                        {k.intern && <span className="tag-intern">intern</span>}
+                      </div>
+                      {k.ansprechpartner && (
+                        <div className="muted small">{k.ansprechpartner}</div>
+                      )}
+                    </td>
+                    <td className="spalte-kontakt">
+                      {k.email && <div className="kontakt-zeile">{k.email}</div>}
+                      {k.telefon && <div className="kontakt-zeile nowrap">{k.telefon}</div>}
+                      {!k.email && !k.telefon && '—'}
+                    </td>
+                    <td className="nowrap">{zeitraum(k.angelegt_am, k.erledigt_am)}</td>
+                    <td className="nowrap">
                       <button
                         className="btn-ghost small"
-                        onClick={() => archivieren(k, !k.archiviert)}
+                        onClick={() => setProjekteVon(k)}
+                        title="Projekte dieses Kunden verwalten"
                       >
-                        {k.archiviert ? 'Reaktivieren' : 'Archivieren'}
+                        {anzahl === 0
+                          ? '+ Projekt anlegen'
+                          : `${anzahl} ${anzahl === 1 ? 'Projekt' : 'Projekte'}`}
                       </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="spalte-aktionen">
+                      <div className="aktionen">
+                        <button className="btn-ghost small" onClick={() => setBearbeiten(k)}>
+                          Bearbeiten
+                        </button>
+                        {k.archiviert ? (
+                          <button className="btn-ghost small" onClick={() => reaktivieren(k)}>
+                            Reaktivieren
+                          </button>
+                        ) : (
+                          <button className="btn-ghost small" onClick={() => setArchivieren(k)}>
+                            Archivieren
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
       )}
 
-      {ausgewaehlt && (
-        <Projekte
-          kunde={kunden.find((k) => k.id === ausgewaehlt)!}
-          onChange={neuLaden}
+      {projekteVon && (
+        <ProjekteDialog
+          kunde={projekteVon}
+          onSchliessen={() => setProjekteVon(null)}
+          onGeaendert={neuLaden}
         />
       )}
 
@@ -219,6 +240,78 @@ export default function Kunden() {
           onGespeichert={neuLaden}
         />
       )}
+
+      {archivieren && (
+        <ArchivDialog
+          kunde={archivieren}
+          onSchliessen={() => setArchivieren(null)}
+          onGespeichert={neuLaden}
+        />
+      )}
+    </div>
+  )
+}
+
+/** Fragt beim Archivieren nach dem Ende des Leistungszeitraums. */
+function ArchivDialog({
+  kunde,
+  onSchliessen,
+  onGespeichert,
+}: {
+  kunde: Kunde
+  onSchliessen: () => void
+  onGespeichert: () => void
+}) {
+  const toast = useToast()
+  const [datum, setDatum] = useState(heuteIso())
+  const [speichert, setSpeichert] = useState(false)
+
+  async function archivieren() {
+    setSpeichert(true)
+    const { error } = await supabase
+      .from('kunden')
+      .update({ archiviert: true, erledigt_am: datum })
+      .eq('id', kunde.id)
+    setSpeichert(false)
+    if (error) {
+      toast('Archivieren fehlgeschlagen.', 'fehler')
+      return
+    }
+    toast('Kunde archiviert.')
+    onGespeichert()
+    onSchliessen()
+  }
+
+  return (
+    <div className="modal-hintergrund" onClick={onSchliessen}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h2>„{kunde.name}" archivieren</h2>
+        <p className="muted small">
+          Der Kunde verschwindet aus den Auswahllisten, gebuchte Zeiten bleiben
+          erhalten. Wann wurde die Zusammenarbeit abgeschlossen?
+        </p>
+
+        <label>
+          Erledigungsdatum
+          <input type="date" value={datum} onChange={(e) => setDatum(e.target.value)} />
+        </label>
+
+        <div className="muted small">
+          Leistungszeitraum: {formatDatum(kunde.angelegt_am)} – {formatDatum(datum)}
+        </div>
+
+        <div className="modal-aktionen">
+          <span />
+          <div className="modal-rechts">
+            <button className="btn-ghost" onClick={onSchliessen}>
+              Abbrechen
+            </button>
+            <button className="btn-primary" onClick={archivieren} disabled={speichert}>
+              {speichert ? 'Archiviert…' : 'Archivieren'}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -233,21 +326,25 @@ function KundeDialog({
   onGespeichert: () => void
 }) {
   const toast = useToast()
+  const { meinProfil } = useProfiles()
+  const istAdmin = meinProfil?.ist_admin ?? false
+
   const [name, setName] = useState(kunde.name)
   const [ansprech, setAnsprech] = useState(kunde.ansprechpartner ?? '')
   const [email, setEmail] = useState(kunde.email ?? '')
   const [telefon, setTelefon] = useState(kunde.telefon ?? '')
   const [nummer, setNummer] = useState(kunde.kundennummer ?? '')
   const [intern, setIntern] = useState(kunde.intern)
+  const [angelegt, setAngelegt] = useState(kunde.angelegt_am)
 
-  // Speichern erst zulassen, wenn sich etwas vom Ausgangszustand unterscheidet.
   const veraendert =
     name.trim() !== kunde.name ||
     ansprech.trim() !== (kunde.ansprechpartner ?? '') ||
     email.trim() !== (kunde.email ?? '') ||
     telefon.trim() !== (kunde.telefon ?? '') ||
     nummer.trim() !== (kunde.kundennummer ?? '') ||
-    intern !== kunde.intern
+    intern !== kunde.intern ||
+    (istAdmin && angelegt !== kunde.angelegt_am)
 
   async function speichern(e: FormEvent) {
     e.preventDefault()
@@ -260,6 +357,9 @@ function KundeDialog({
         telefon: telefon.trim() || null,
         kundennummer: nummer.trim() || null,
         intern,
+        // Nur Administratoren dürfen das Anlagedatum verschieben; die
+        // Datenbank weist es andernfalls ohnehin ab.
+        ...(istAdmin ? { angelegt_am: angelegt } : {}),
       })
       .eq('id', kunde.id)
     if (error) {
@@ -296,9 +396,24 @@ function KundeDialog({
           <input
             value={nummer}
             onChange={(e) => setNummer(e.target.value)}
-            placeholder="z. B. K-0007"
+            placeholder="z. B. K-00007"
           />
         </label>
+        <label>
+          Angelegt am {!istAdmin && <span className="muted small">(nur Administrator)</span>}
+          <input
+            type="date"
+            value={angelegt}
+            onChange={(e) => setAngelegt(e.target.value)}
+            disabled={!istAdmin}
+          />
+        </label>
+        {kunde.erledigt_am && (
+          <div className="muted small">
+            Erledigt am {formatDatum(kunde.erledigt_am)} – beim Reaktivieren wird das
+            Datum entfernt.
+          </div>
+        )}
         <label className="checkbox-inline">
           <input type="checkbox" checked={intern} onChange={(e) => setIntern(e.target.checked)} />
           Interner Kunde
@@ -324,10 +439,24 @@ function KundeDialog({
   )
 }
 
-function Projekte({ kunde, onChange }: { kunde: Kunde; onChange: () => void }) {
+/**
+ * Projekte eines Kunden. Bewusst als Dialog: Vorher klappte die Liste unter
+ * der Tabelle auf und lag dadurch außerhalb des sichtbaren Bereichs – es sah
+ * aus, als würde der Klick nichts bewirken.
+ */
+function ProjekteDialog({
+  kunde,
+  onSchliessen,
+  onGeaendert,
+}: {
+  kunde: Kunde
+  onSchliessen: () => void
+  onGeaendert: () => void
+}) {
   const toast = useToast()
   const { projekte } = useStammdaten()
   const [name, setName] = useState('')
+  const [erledigt, setErledigt] = useState<Projekt | null>(null)
 
   const eigene = projekte.filter((p) => p.kunde_id === kunde.id)
 
@@ -341,52 +470,151 @@ function Projekte({ kunde, onChange }: { kunde: Kunde; onChange: () => void }) {
       toast('Projekt konnte nicht angelegt werden.', 'fehler')
       return
     }
+    toast(`Projekt „${name.trim()}" angelegt.`)
     setName('')
-    onChange()
+    onGeaendert()
   }
 
-  async function archivieren(id: string, archiv: boolean) {
-    await supabase.from('projekte').update({ archiviert: archiv }).eq('id', id)
-    onChange()
+  async function reaktivieren(p: Projekt) {
+    await supabase
+      .from('projekte')
+      .update({ archiviert: false, erledigt_am: null })
+      .eq('id', p.id)
+    onGeaendert()
   }
 
   return (
-    <div className="card">
-      <h2>Projekte von „{kunde.name}"</h2>
-      <form className="inline-form" onSubmit={neu}>
-        <input
-          placeholder="Neues Projekt…"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <button className="btn-primary" type="submit">
-          Hinzufügen
-        </button>
-      </form>
-      {eigene.length === 0 ? (
-        <p className="muted">Noch keine Projekte.</p>
-      ) : (
-        <ul className="liste">
-          {eigene.map((p) => (
-            <li key={p.id}>
-              <span className={p.archiviert ? 'muted' : ''}>
-                {p.name}
-                {p.archiviert && ' (archiviert)'}
-              </span>
-              <button
-                className="btn-ghost small"
-                onClick={() => archivieren(p.id, !p.archiviert)}
-              >
-                {p.archiviert ? 'Reaktivieren' : 'Archivieren'}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <p className="muted small">
-        Archivieren statt löschen: Bereits gebuchte Zeiten behalten so ihre
-        Zuordnung und bleiben in der Abrechnung nachvollziehbar.
-      </p>
+    <div className="modal-hintergrund" onClick={onSchliessen}>
+      <div className="modal breit" onClick={(e) => e.stopPropagation()}>
+        <h2>Projekte von „{kunde.name}"</h2>
+        <p className="muted small">
+          Wofür wurdet ihr beauftragt? Zum Beispiel „Visitenkartengestaltung"
+          oder „Flyergestaltung". Diese Projekte stehen dann in der Stoppuhr zur
+          Auswahl.
+        </p>
+
+        <form className="inline-form" onSubmit={neu}>
+          <input
+            placeholder="Neues Projekt…"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            autoFocus
+          />
+          <button className="btn-primary" type="submit" disabled={!name.trim()}>
+            Anlegen
+          </button>
+        </form>
+
+        {eigene.length === 0 ? (
+          <p className="muted">Noch keine Projekte für diesen Kunden.</p>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Projekt</th>
+                  <th>Zeitraum</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {eigene.map((p) => (
+                  <tr key={p.id}>
+                    <td className={p.archiviert ? 'muted' : ''}>
+                      {p.name}
+                      {p.archiviert && <span className="tag-intern">archiviert</span>}
+                    </td>
+                    <td className="nowrap">{zeitraum(p.angelegt_am, p.erledigt_am)}</td>
+                    <td className="spalte-aktionen">
+                      <div className="aktionen">
+                        {p.archiviert ? (
+                          <button className="btn-ghost small" onClick={() => reaktivieren(p)}>
+                            Reaktivieren
+                          </button>
+                        ) : (
+                          <button className="btn-ghost small" onClick={() => setErledigt(p)}>
+                            Archivieren
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="modal-aktionen">
+          <span />
+          <div className="modal-rechts">
+            <button className="btn-primary" onClick={onSchliessen}>
+              Fertig
+            </button>
+          </div>
+        </div>
+
+        {erledigt && (
+          <ProjektArchivDialog
+            projekt={erledigt}
+            onSchliessen={() => setErledigt(null)}
+            onGespeichert={onGeaendert}
+          />
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ProjektArchivDialog({
+  projekt,
+  onSchliessen,
+  onGespeichert,
+}: {
+  projekt: Projekt
+  onSchliessen: () => void
+  onGespeichert: () => void
+}) {
+  const toast = useToast()
+  const [datum, setDatum] = useState(heuteIso())
+
+  async function archivieren() {
+    const { error } = await supabase
+      .from('projekte')
+      .update({ archiviert: true, erledigt_am: datum })
+      .eq('id', projekt.id)
+    if (error) {
+      toast('Archivieren fehlgeschlagen.', 'fehler')
+      return
+    }
+    toast('Projekt archiviert.')
+    onGespeichert()
+    onSchliessen()
+  }
+
+  return (
+    <div className="modal-hintergrund" onClick={onSchliessen}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h2>„{projekt.name}" abschließen</h2>
+        <label>
+          Erledigungsdatum
+          <input type="date" value={datum} onChange={(e) => setDatum(e.target.value)} />
+        </label>
+        <div className="muted small">
+          Leistungszeitraum: {formatDatum(projekt.angelegt_am)} – {formatDatum(datum)}
+        </div>
+        <div className="modal-aktionen">
+          <span />
+          <div className="modal-rechts">
+            <button className="btn-ghost" onClick={onSchliessen}>
+              Abbrechen
+            </button>
+            <button className="btn-primary" onClick={archivieren}>
+              Archivieren
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

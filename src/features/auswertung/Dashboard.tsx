@@ -108,7 +108,7 @@ export default function Dashboard() {
           <div className="kpi-value">{gefiltert.length}</div>
         </div>
         <div className="kpi">
-          <div className="kpi-label">Kunden</div>
+          <div className="kpi-label">Kunden (aktiv)</div>
           <div className="kpi-value">{kunden.filter((k) => !k.archiviert).length}</div>
         </div>
         <div className="kpi">

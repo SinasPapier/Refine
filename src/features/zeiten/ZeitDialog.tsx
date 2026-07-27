@@ -30,8 +30,15 @@ export default function ZeitDialog({
   onGespeichert: () => void
 }) {
   const { session } = useAuth()
-  const { aktiveProjekte, projektLabel, saetze, satzVon, istInternesProjekt } =
-    useStammdaten()
+  const {
+    aktiveKunden,
+    projekteVonKunde,
+    projektLabel,
+    kundeVonProjekt,
+    saetze,
+    satzVon,
+    istInternesProjekt,
+  } = useStammdaten()
   const toast = useToast()
 
   // Ausgangszustand merken, damit "Speichern" erst bei echten Änderungen greift.
@@ -48,14 +55,19 @@ export default function ZeitDialog({
 
   const [datum, setDatum] = useState(start.datum)
   const [dauer, setDauer] = useState(start.dauer)
+  // Kunde wird aus dem Projekt abgeleitet; die Auswahl läuft dann kaskadiert.
+  const [kundeId, setKundeId] = useState(
+    () => kundeVonProjekt(start.projektId || null)?.id ?? '',
+  )
   const [projektId, setProjektId] = useState(start.projektId)
   const [taetigkeit, setTaetigkeit] = useState(start.taetigkeit)
   const [beschreibung, setBeschreibung] = useState(start.beschreibung)
   const [speichert, setSpeichert] = useState(false)
 
+  const projekteDesKunden = kundeId ? projekteVonKunde(kundeId) : []
   // Ein bereits archiviertes Projekt soll beim Bearbeiten sichtbar bleiben.
   const projektFehlt =
-    projektId !== '' && !aktiveProjekte.some((p) => p.id === projektId)
+    projektId !== '' && !projekteDesKunden.some((p) => p.id === projektId)
 
   const veraendert =
     datum !== start.datum ||
@@ -70,6 +82,12 @@ export default function ZeitDialog({
   // Hinweis auf unplausible Eingaben – blockiert nicht, macht aber aufmerksam.
   const geparst = parseDauerZuMinuten(dauer)
   const hinweis = geparst !== null && geparst > 0 ? pruefeBuchung(geparst, datum) : null
+
+  function kundeWechseln(neu: string) {
+    setKundeId(neu)
+    setProjektId('')
+    if (aktiveKunden.find((k) => k.id === neu)?.intern) setTaetigkeit('intern')
+  }
 
   function projektWechseln(neu: string) {
     setProjektId(neu)
@@ -146,15 +164,31 @@ export default function ZeitDialog({
         </label>
 
         <label>
+          Kunde
+          <select value={kundeId} onChange={(e) => kundeWechseln(e.target.value)}>
+            <option value="">— ohne Kunde —</option>
+            {aktiveKunden.map((k) => (
+              <option key={k.id} value={k.id}>
+                {k.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label>
           Projekt
-          <select value={projektId} onChange={(e) => projektWechseln(e.target.value)}>
+          <select
+            value={projektId}
+            onChange={(e) => projektWechseln(e.target.value)}
+            disabled={!kundeId}
+          >
             <option value="">— ohne Projekt —</option>
             {projektFehlt && (
               <option value={projektId}>{projektLabel(projektId)} (archiviert)</option>
             )}
-            {aktiveProjekte.map((p) => (
+            {projekteDesKunden.map((p) => (
               <option key={p.id} value={p.id}>
-                {projektLabel(p.id)}
+                {p.name}
               </option>
             ))}
           </select>
