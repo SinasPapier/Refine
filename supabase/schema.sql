@@ -437,6 +437,32 @@ create trigger schuetze_angelegt_am_projekte
   for each row execute function public.schuetze_angelegt_am();
 
 
+-- Hält fest, wer ein Projekt in den Papierkorb gelegt hat. Aus demselben Grund
+-- im Trigger wie beim Statuswechsel: Der Papierkorb zeigt den Namen an, und
+-- über die Schnittstelle ließ sich dort bisher ein fremdes Konto eintragen.
+create or replace function public.projekt_papierkorb_protokoll()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.geloescht_am is distinct from old.geloescht_am then
+    new.geloescht_von := case
+      when new.geloescht_am is null then null
+      else coalesce(auth.uid(), new.geloescht_von)
+    end;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists projekt_papierkorb_protokoll on public.projekte;
+create trigger projekt_papierkorb_protokoll
+  before update on public.projekte
+  for each row execute function public.projekt_papierkorb_protokoll();
+
+
 -- Protokolliert jeden Statuswechsel einer Position.
 --
 -- Bewusst im Trigger und nicht in der App: Der Status wird an zwei Stellen
@@ -502,15 +528,43 @@ begin
   end loop;
 end $$;
 
--- Gemeinsam genutzte Stammdaten: alle Angemeldeten dürfen alles bearbeiten.
-create policy "auth_all" on public.kunden
-  for all to authenticated using (true) with check (true);
-create policy "auth_all" on public.projekte
-  for all to authenticated using (true) with check (true);
+-- Gemeinsam genutzte Stammdaten: alle Angemeldeten dürfen lesen, anlegen und
+-- ändern – aber NICHT löschen.
+--
+-- Die App bietet das Löschen nirgends an: Kunden werden archiviert, Projekte
+-- wandern in den Papierkorb. Über die Schnittstelle war ein hartes "delete"
+-- trotzdem möglich, und daran hängen Fremdschlüssel mit "on delete cascade":
+-- ein einziger Aufruf hätte sämtliche Projekte, Positionen und Notizen
+-- mitgerissen, unwiderruflich. Ohne Löschregel weist die Datenbank das ab.
+create policy "kunden_select" on public.kunden
+  for select to authenticated using (true);
+create policy "kunden_insert" on public.kunden
+  for insert to authenticated with check (true);
+create policy "kunden_update" on public.kunden
+  for update to authenticated using (true) with check (true);
 
--- Deadlines sind gemeinsame Team-Information.
-create policy "termine_all" on public.termine
-  for all to authenticated using (true) with check (true);
+create policy "projekte_select" on public.projekte
+  for select to authenticated using (true);
+create policy "projekte_insert" on public.projekte
+  for insert to authenticated with check (true);
+create policy "projekte_update" on public.projekte
+  for update to authenticated using (true) with check (true);
+
+revoke delete on public.kunden   from authenticated, anon;
+revoke delete on public.projekte from authenticated, anon;
+
+-- Deadlines sind gemeinsame Team-Information: alle dürfen alles bearbeiten.
+-- Beim Anlegen ist aber "erstellt_von" an das eigene Konto gebunden, sonst
+-- ließe sich eine Deadline unter fremdem Namen einstellen.
+create policy "termine_select" on public.termine
+  for select to authenticated using (true);
+create policy "termine_insert" on public.termine
+  for insert to authenticated
+  with check (erstellt_von is null or erstellt_von = auth.uid());
+create policy "termine_update" on public.termine
+  for update to authenticated using (true) with check (true);
+create policy "termine_delete" on public.termine
+  for delete to authenticated using (true);
 grant select, insert, update, delete on public.termine to authenticated;
 
 -- Positionen gehören zum Projekt und werden gemeinsam gepflegt.
