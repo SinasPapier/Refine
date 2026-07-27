@@ -1,27 +1,27 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../lib/supabase'
-import type { Arbeitszeit, Kunde, Projekt } from '../../lib/types'
+import type { Arbeitszeit, LaufendeZeit } from '../../lib/types'
 import { formatDauer } from '../../lib/format'
-import { useProfiles, nameVon } from '../profile/useProfiles'
+import { isoDatum } from '../../lib/datum'
+import { useProfiles } from '../profile/ProfileProvider'
+import { useStammdaten } from '../stammdaten/StammdatenProvider'
 
 type Zeitraum = 'monat' | 'jahr' | 'alle'
 
 export default function Dashboard() {
-  const { profiles } = useProfiles()
+  const { profiles, nameVon, farbeVon } = useProfiles()
+  const { kunden, kundeVonProjekt } = useStammdaten()
   const [zeiten, setZeiten] = useState<Arbeitszeit[]>([])
-  const [projekte, setProjekte] = useState<Projekt[]>([])
-  const [kunden, setKunden] = useState<Kunde[]>([])
+  const [laufende, setLaufende] = useState<LaufendeZeit[]>([])
   const [zeitraum, setZeitraum] = useState<Zeitraum>('monat')
 
   useEffect(() => {
     Promise.all([
       supabase.from('arbeitszeiten').select('*'),
-      supabase.from('projekte').select('*'),
-      supabase.from('kunden').select('*'),
-    ]).then(([z, p, k]) => {
+      supabase.from('laufende_zeiten').select('*'),
+    ]).then(([z, l]) => {
       setZeiten((z.data as Arbeitszeit[]) ?? [])
-      setProjekte((p.data as Projekt[]) ?? [])
-      setKunden((k.data as Kunde[]) ?? [])
+      setLaufende((l.data as LaufendeZeit[]) ?? [])
     })
   }, [])
 
@@ -32,7 +32,7 @@ export default function Dashboard() {
       zeitraum === 'monat'
         ? new Date(jetzt.getFullYear(), jetzt.getMonth(), 1)
         : new Date(jetzt.getFullYear(), 0, 1)
-    const grenzeIso = grenze.toISOString().slice(0, 10)
+    const grenzeIso = isoDatum(grenze)
     return zeiten.filter((z) => z.datum >= grenzeIso)
   }, [zeiten, zeitraum])
 
@@ -49,13 +49,11 @@ export default function Dashboard() {
   const proKunde = useMemo(() => {
     const map = new Map<string, number>()
     for (const z of gefiltert) {
-      const proj = projekte.find((p) => p.id === z.projekt_id)
-      const kundeId = proj?.kunde_id ?? null
-      const key = kundeId ?? '—'
+      const key = kundeVonProjekt(z.projekt_id)?.id ?? '—'
       map.set(key, (map.get(key) ?? 0) + z.dauer_minuten)
     }
     return [...map.entries()].sort((a, b) => b[1] - a[1])
-  }, [gefiltert, projekte])
+  }, [gefiltert, kundeVonProjekt])
 
   function kundeName(id: string): string {
     if (id === '—') return 'Ohne Projekt/Kunde'
@@ -65,6 +63,17 @@ export default function Dashboard() {
   return (
     <div>
       <h1>Übersicht</h1>
+
+      {laufende.length > 0 && (
+        <div className="laeuft-gerade">
+          {laufende.map((l) => (
+            <span key={l.gesellschafter_id} className="laeuft-chip">
+              <span className="puls" style={{ background: farbeVon(l.gesellschafter_id) }} />
+              {nameVon(l.gesellschafter_id)} arbeitet gerade
+            </span>
+          ))}
+        </div>
+      )}
 
       <div className="segmented">
         {(['monat', 'jahr', 'alle'] as Zeitraum[]).map((z) => (
@@ -89,7 +98,7 @@ export default function Dashboard() {
         </div>
         <div className="kpi">
           <div className="kpi-label">Kunden</div>
-          <div className="kpi-value">{kunden.length}</div>
+          <div className="kpi-value">{kunden.filter((k) => !k.archiviert).length}</div>
         </div>
         <div className="kpi">
           <div className="kpi-label">Gesellschafter</div>
@@ -105,8 +114,9 @@ export default function Dashboard() {
           ) : (
             <BalkenListe
               rows={proPerson.map(([id, min]) => ({
-                label: nameVon(profiles, id),
+                label: nameVon(id),
                 minuten: min,
+                farbe: farbeVon(id),
               }))}
               max={gesamt}
             />
@@ -133,7 +143,7 @@ function BalkenListe({
   rows,
   max,
 }: {
-  rows: { label: string; minuten: number }[]
+  rows: { label: string; minuten: number; farbe?: string }[]
   max: number
 }) {
   return (
@@ -147,7 +157,10 @@ function BalkenListe({
           <div className="balken-track">
             <div
               className="balken-fill"
-              style={{ width: max > 0 ? `${(r.minuten / max) * 100}%` : '0%' }}
+              style={{
+                width: max > 0 ? `${(r.minuten / max) * 100}%` : '0%',
+                background: r.farbe,
+              }}
             />
           </div>
         </li>

@@ -2,11 +2,11 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { supabase } from '../../lib/supabase'
 import type { Zustaendigkeit } from '../../lib/types'
 import { useToast } from '../../components/Toast'
-import { useProfiles, nameVon } from '../profile/useProfiles'
+import { useProfiles } from '../profile/ProfileProvider'
 
 export default function Zustaendigkeiten() {
   const toast = useToast()
-  const { profiles } = useProfiles()
+  const { profiles, nameVon } = useProfiles()
   const [liste, setListe] = useState<Zustaendigkeit[]>([])
 
   const [titel, setTitel] = useState('')
@@ -82,7 +82,7 @@ export default function Zustaendigkeiten() {
               <option value="">— niemand —</option>
               {profiles.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name || p.email}
+                  {nameVon(p.id)}
                 </option>
               ))}
             </select>
@@ -123,12 +123,12 @@ export default function Zustaendigkeiten() {
                       className="mini"
                       value={z.gesellschafter_id ?? ''}
                       onChange={(e) => setzePerson(z.id, e.target.value)}
-                      title={nameVon(profiles, z.gesellschafter_id)}
+                      title={nameVon(z.gesellschafter_id)}
                     >
                       <option value="">— niemand —</option>
                       {profiles.map((p) => (
                         <option key={p.id} value={p.id}>
-                          {p.name || p.email}
+                          {nameVon(p.id)}
                         </option>
                       ))}
                     </select>

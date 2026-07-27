@@ -1,21 +1,36 @@
 import { useState } from 'react'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
 import { useAuth } from './features/auth/useAuth'
+import { useProfiles } from './features/profile/ProfileProvider'
 import Login from './features/auth/Login'
+import Profil from './features/profile/Profil'
+import Timer from './features/timer/Timer'
 import Dashboard from './features/auswertung/Dashboard'
+import Kalender from './features/kalender/Kalender'
 import Zeiten from './features/zeiten/Zeiten'
 import Kunden from './features/kunden/Kunden'
 import Zustaendigkeiten from './features/zustaendigkeiten/Zustaendigkeiten'
 import Nummern from './features/nummern/Nummern'
+import Abrechnung from './features/abrechnung/Abrechnung'
 
-type View = 'dashboard' | 'zeiten' | 'kunden' | 'zustaendigkeiten' | 'nummern'
+type View =
+  | 'dashboard'
+  | 'kalender'
+  | 'zeiten'
+  | 'kunden'
+  | 'zustaendigkeiten'
+  | 'nummern'
+  | 'abrechnung'
+  | 'profil'
 
 const NAV: { key: View; label: string; icon: string }[] = [
   { key: 'dashboard', label: 'Übersicht', icon: '📊' },
+  { key: 'kalender', label: 'Kalender', icon: '🗓️' },
   { key: 'zeiten', label: 'Arbeitszeiten', icon: '⏱️' },
   { key: 'kunden', label: 'Kunden & Projekte', icon: '🏢' },
   { key: 'zustaendigkeiten', label: 'Zuständigkeiten', icon: '✅' },
   { key: 'nummern', label: 'Nummern', icon: '🔢' },
+  { key: 'abrechnung', label: 'Abrechnung', icon: '🧾' },
 ]
 
 function NichtKonfiguriert() {
@@ -28,10 +43,6 @@ function NichtKonfiguriert() {
           Werte <code>VITE_SUPABASE_URL</code> und{' '}
           <code>VITE_SUPABASE_ANON_KEY</code>.
         </p>
-        <p className="muted small">
-          Lokal: in einer Datei <code>.env</code> (siehe <code>.env.example</code>).
-          Auf GitHub Pages: als Repository-Variables (siehe README).
-        </p>
       </div>
     </div>
   )
@@ -39,13 +50,21 @@ function NichtKonfiguriert() {
 
 export default function App() {
   const { session, laden } = useAuth()
+  const { meinProfil, laden: profileLaden, nameVon, farbeVon } = useProfiles()
   const [view, setView] = useState<View>('dashboard')
+  // Erzwingt ein Neuladen der Listen, wenn die Stoppuhr einen Eintrag anlegt.
+  const [datenStand, setDatenStand] = useState(0)
 
   if (!isSupabaseConfigured) return <NichtKonfiguriert />
   if (laden) return <div className="center-hint">Lädt…</div>
   if (!session) return <Login />
+  if (profileLaden) return <div className="center-hint">Lädt…</div>
 
-  const email = session.user.email ?? ''
+  // Solange kein Anzeigename gesetzt ist, zuerst danach fragen.
+  const nameFehlt = !meinProfil || !(meinProfil.name ?? '').trim()
+  if (nameFehlt) return <Profil begruessung />
+
+  const meineFarbe = farbeVon(session.user.id)
 
   return (
     <div className="app-shell">
@@ -64,9 +83,13 @@ export default function App() {
           ))}
         </nav>
         <div className="sidebar-foot">
-          <div className="muted small" title={email}>
-            {email}
-          </div>
+          <button
+            className={view === 'profil' ? 'nav-item active' : 'nav-item'}
+            onClick={() => setView('profil')}
+          >
+            <span className="punkt" style={{ background: meineFarbe }} />
+            {nameVon(session.user.id)}
+          </button>
           <button className="btn-ghost" onClick={() => supabase.auth.signOut()}>
             Abmelden
           </button>
@@ -74,11 +97,18 @@ export default function App() {
       </aside>
 
       <main className="content">
-        {view === 'dashboard' && <Dashboard />}
-        {view === 'zeiten' && <Zeiten session={session} />}
-        {view === 'kunden' && <Kunden />}
-        {view === 'zustaendigkeiten' && <Zustaendigkeiten />}
-        {view === 'nummern' && <Nummern />}
+        <Timer onGebucht={() => setDatenStand((n) => n + 1)} />
+
+        <div key={`${view}-${datenStand}`}>
+          {view === 'dashboard' && <Dashboard />}
+          {view === 'kalender' && <Kalender />}
+          {view === 'zeiten' && <Zeiten />}
+          {view === 'kunden' && <Kunden />}
+          {view === 'zustaendigkeiten' && <Zustaendigkeiten />}
+          {view === 'nummern' && <Nummern />}
+          {view === 'abrechnung' && <Abrechnung />}
+          {view === 'profil' && <Profil />}
+        </div>
       </main>
     </div>
   )

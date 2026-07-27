@@ -36,6 +36,8 @@ create table if not exists public.kunden (
   telefon        text,
   adresse        text,
   notiz          text,
+  stundensatz    numeric,
+  archiviert     boolean not null default false,
   created_at     timestamptz not null default now()
 );
 
@@ -48,6 +50,7 @@ create table if not exists public.projekte (
   name        text not null,
   beschreibung text,
   status      text not null default 'aktiv',
+  archiviert  boolean not null default false,
   created_at  timestamptz not null default now()
 );
 
@@ -61,7 +64,23 @@ create table if not exists public.arbeitszeiten (
   datum            date not null default current_date,
   dauer_minuten    integer not null check (dauer_minuten >= 0),
   beschreibung     text,
+  -- Tatsächliche Start-/Endzeit, wenn der Eintrag von der Stoppuhr stammt.
+  start_zeit       timestamptz,
+  end_zeit         timestamptz,
   created_at       timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------------
+-- Tabelle: laufende_zeiten (Zustand der Stoppuhr)
+-- Liegt in der Datenbank, damit die Uhr weiterläuft, wenn der Browser
+-- geschlossen oder das Gerät gewechselt wird.
+-- Primärschlüssel = Nutzer: pro Person kann nur eine Uhr laufen.
+-- ---------------------------------------------------------------------------
+create table if not exists public.laufende_zeiten (
+  gesellschafter_id uuid primary key references auth.users (id) on delete cascade,
+  projekt_id        uuid references public.projekte (id) on delete set null,
+  beschreibung      text,
+  gestartet_am      timestamptz not null default now()
 );
 
 -- ---------------------------------------------------------------------------
@@ -181,8 +200,10 @@ security definer
 set search_path = public
 as $$
 begin
+  -- Bewusst ohne Namen: den Anzeigenamen legt jede Person selbst fest,
+  -- die App fragt beim ersten Login danach.
   insert into public.profile (id, name, email)
-  values (new.id, coalesce(new.raw_user_meta_data ->> 'name', split_part(new.email, '@', 1)), new.email)
+  values (new.id, '', new.email)
   on conflict (id) do nothing;
   return new;
 end;
@@ -203,6 +224,7 @@ alter table public.arbeitszeiten    enable row level security;
 alter table public.zustaendigkeiten enable row level security;
 alter table public.nummernkreise    enable row level security;
 alter table public.nummern_log      enable row level security;
+alter table public.laufende_zeiten  enable row level security;
 
 -- Gemeinsam genutzte Stammdaten: alle Angemeldeten dürfen alles bearbeiten.
 do $$
@@ -231,6 +253,10 @@ drop policy if exists "log_select" on public.nummern_log;
 drop policy if exists "auth_all"      on public.nummernkreise;
 drop policy if exists "kreise_select" on public.nummernkreise;
 drop policy if exists "kreise_update" on public.nummernkreise;
+drop policy if exists "timer_select" on public.laufende_zeiten;
+drop policy if exists "timer_insert" on public.laufende_zeiten;
+drop policy if exists "timer_update" on public.laufende_zeiten;
+drop policy if exists "timer_delete" on public.laufende_zeiten;
 
 -- Arbeitszeiten: alle sehen alles, bearbeiten nur die eigenen Einträge.
 create policy "zeiten_select" on public.arbeitszeiten
@@ -268,6 +294,25 @@ create policy "kreise_select" on public.nummernkreise
 
 create policy "kreise_update" on public.nummernkreise
   for update to authenticated using (true) with check (true);
+
+-- Stoppuhr: alle sehen, wer gerade arbeitet – starten/stoppen nur die eigene.
+create policy "timer_select" on public.laufende_zeiten
+  for select to authenticated using (true);
+
+create policy "timer_insert" on public.laufende_zeiten
+  for insert to authenticated with check (gesellschafter_id = auth.uid());
+
+create policy "timer_update" on public.laufende_zeiten
+  for update to authenticated
+  using (gesellschafter_id = auth.uid())
+  with check (gesellschafter_id = auth.uid());
+
+create policy "timer_delete" on public.laufende_zeiten
+  for delete to authenticated using (gesellschafter_id = auth.uid());
+
+-- Zugriffsrechte ausdrücklich vergeben, damit die Tabelle unabhängig von der
+-- Supabase-Einstellung "Automatically expose new tables" funktioniert.
+grant select, insert, update, delete on public.laufende_zeiten to authenticated;
 
 -- Spaltengenau: "zaehler" und "jahr" lassen sich nicht von Hand ändern.
 revoke update on public.nummernkreise from authenticated;

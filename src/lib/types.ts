@@ -18,6 +18,8 @@ export interface Kunde {
   telefon: string | null
   adresse: string | null
   notiz: string | null
+  stundensatz: number | null
+  archiviert: boolean
   created_at: string
 }
 
@@ -27,6 +29,7 @@ export interface Projekt {
   name: string
   beschreibung: string | null
   status: string
+  archiviert: boolean
   created_at: string
 }
 
@@ -37,7 +40,17 @@ export interface Arbeitszeit {
   datum: string
   dauer_minuten: number
   beschreibung: string | null
+  start_zeit: string | null
+  end_zeit: string | null
   created_at: string
+}
+
+/** Laufende Stoppuhr – pro Person höchstens eine. */
+export interface LaufendeZeit {
+  gesellschafter_id: string
+  projekt_id: string | null
+  beschreibung: string | null
+  gestartet_am: string
 }
 
 export interface Zustaendigkeit {
@@ -69,3 +82,19 @@ export interface NummernLog {
   erzeugt_am: string
   notiz: string | null
 }
+
+/** Auswahlfarben für die Gesellschafter (Kalender, Auswertungen). */
+export const FARBEN = [
+  '#4f46e5', // Indigo
+  '#0284c7', // Blau
+  '#0891b2', // Türkis
+  '#059669', // Grün
+  '#4d7c0f', // Oliv
+  '#ca8a04', // Gelb
+  '#ea580c', // Orange
+  '#dc2626', // Rot
+  '#db2777', // Pink
+  '#7c3aed', // Violett
+] as const
+
+export const STANDARD_FARBE = FARBEN[0]
