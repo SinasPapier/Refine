@@ -1,17 +1,11 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { supabase } from '../../lib/supabase'
-import type { Kunde, Position, PositionStatus, Projekt } from '../../lib/types'
-import { POSITION_STATUS } from '../../lib/types'
-import { heuteIso } from '../../lib/datum'
+import type { Kunde, Position, Projekt } from '../../lib/types'
+import { NAECHSTER_STATUS, POSITION_STATUS } from '../../lib/types'
 import { useToast } from '../../components/Toast'
+import { useProfiles } from '../profile/ProfileProvider'
 import { projektNummer } from './ProjekteDialog'
-
-/** Klick schaltet weiter: offen → in Arbeit → erledigt → offen. */
-const NAECHSTER: Record<PositionStatus, PositionStatus> = {
-  offen: 'in_arbeit',
-  in_arbeit: 'erledigt',
-  erledigt: 'offen',
-}
+import StatusUrheber from '../../components/StatusUrheber'
 
 /**
  * Die Bestandteile eines Projekts. Das Projekt bleibt die Abrechnungseinheit;
@@ -29,6 +23,7 @@ export default function PositionenDialog({
   onGeaendert: () => void
 }) {
   const toast = useToast()
+  const { nameVon, farbeVon } = useProfiles()
   const [positionen, setPositionen] = useState<Position[]>([])
   const [bezeichnung, setBezeichnung] = useState('')
 
@@ -64,13 +59,10 @@ export default function PositionenDialog({
   }
 
   async function statusWechseln(p: Position) {
-    const neuerStatus = NAECHSTER[p.status]
+    // erledigt_am, status_von und status_am setzt der Trigger in der Datenbank.
     await supabase
       .from('positionen')
-      .update({
-        status: neuerStatus,
-        erledigt_am: neuerStatus === 'erledigt' ? heuteIso() : null,
-      })
+      .update({ status: NAECHSTER_STATUS[p.status] })
       .eq('id', p.id)
     await laden()
     onGeaendert()
@@ -135,6 +127,7 @@ export default function PositionenDialog({
                     {POSITION_STATUS[p.status]}
                   </button>
                   <span className="positions-name">{p.bezeichnung}</span>
+                  <StatusUrheber position={p} nameVon={nameVon} farbeVon={farbeVon} />
                   <button
                     className="btn-ghost small danger"
                     onClick={() => loeschen(p)}

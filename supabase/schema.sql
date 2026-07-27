@@ -83,6 +83,9 @@ create table if not exists public.positionen (
   status       text not null default 'offen',  -- offen | in_arbeit | erledigt
   sortierung   integer not null default 0,
   erledigt_am  date,
+  -- Wer hat zuletzt umgeschaltet? Wird vom Trigger gesetzt, nicht von der App.
+  status_von   uuid references public.profile (id),
+  status_am    timestamptz,
   created_at   timestamptz not null default now()
 );
 
@@ -201,6 +204,11 @@ alter table public.projekte alter column angelegt_am set not null;
 -- nachvollziehbar, wer wann etwas entfernt hat.
 alter table public.projekte add column if not exists geloescht_am  timestamptz;
 alter table public.projekte add column if not exists geloescht_von uuid references public.profile (id);
+
+-- Wer hat den Status einer Position zuletzt geändert? In einem Team zu dritt
+-- ist das die naheliegende Rückfrage zu "erledigt".
+alter table public.positionen add column if not exists status_von uuid references public.profile (id);
+alter table public.positionen add column if not exists status_am  timestamptz;
 
 -- Am Kunden wieder entfernt: für die Dokumentation zählt der Zeitraum des
 -- Auftrags, nicht der der Kundenbeziehung.
@@ -429,6 +437,65 @@ create trigger schuetze_angelegt_am_projekte
   for each row execute function public.schuetze_angelegt_am();
 
 
+-- Hält fest, wer ein Projekt in den Papierkorb gelegt hat. Aus demselben Grund
+-- im Trigger wie beim Statuswechsel: Der Papierkorb zeigt den Namen an, und
+-- über die Schnittstelle ließ sich dort bisher ein fremdes Konto eintragen.
+create or replace function public.projekt_papierkorb_protokoll()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.geloescht_am is distinct from old.geloescht_am then
+    new.geloescht_von := case
+      when new.geloescht_am is null then null
+      else coalesce(auth.uid(), new.geloescht_von)
+    end;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists projekt_papierkorb_protokoll on public.projekte;
+create trigger projekt_papierkorb_protokoll
+  before update on public.projekte
+  for each row execute function public.projekt_papierkorb_protokoll();
+
+
+-- Protokolliert jeden Statuswechsel einer Position.
+--
+-- Bewusst im Trigger und nicht in der App: Der Status wird an zwei Stellen
+-- geschaltet (Projektdialog und Übersicht). So steht die Regel einmal, kann in
+-- keinem Aufrufpfad vergessen werden, und "status_von" ist vom Client nicht
+-- fälschbar – sonst ließe sich eine Erledigung einem anderen Gesellschafter
+-- unterschieben.
+create or replace function public.positions_status_protokoll()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if tg_op = 'INSERT' or new.status is distinct from old.status then
+    -- auth.uid() ist null bei direktem Zugriff über den SQL-Editor; dort bleibt
+    -- ein bereits gesetzter Wert stehen, statt ihn zu leeren.
+    new.status_von := coalesce(auth.uid(), new.status_von);
+    new.status_am  := now();
+    -- Das Erledigungsdatum gehört zum selben Vorgang und wird deshalb hier
+    -- gesetzt, statt in jeder Oberfläche einzeln.
+    new.erledigt_am := case when new.status = 'erledigt' then current_date end;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists positions_status_protokoll on public.positionen;
+create trigger positions_status_protokoll
+  before insert or update on public.positionen
+  for each row execute function public.positions_status_protokoll();
+
+
 -- ############################################################################
 -- 5) SICHERHEIT (Row Level Security)
 -- Ohne Anmeldung ist nichts sichtbar. Angemeldete Gesellschafter arbeiten
@@ -461,15 +528,43 @@ begin
   end loop;
 end $$;
 
--- Gemeinsam genutzte Stammdaten: alle Angemeldeten dürfen alles bearbeiten.
-create policy "auth_all" on public.kunden
-  for all to authenticated using (true) with check (true);
-create policy "auth_all" on public.projekte
-  for all to authenticated using (true) with check (true);
+-- Gemeinsam genutzte Stammdaten: alle Angemeldeten dürfen lesen, anlegen und
+-- ändern – aber NICHT löschen.
+--
+-- Die App bietet das Löschen nirgends an: Kunden werden archiviert, Projekte
+-- wandern in den Papierkorb. Über die Schnittstelle war ein hartes "delete"
+-- trotzdem möglich, und daran hängen Fremdschlüssel mit "on delete cascade":
+-- ein einziger Aufruf hätte sämtliche Projekte, Positionen und Notizen
+-- mitgerissen, unwiderruflich. Ohne Löschregel weist die Datenbank das ab.
+create policy "kunden_select" on public.kunden
+  for select to authenticated using (true);
+create policy "kunden_insert" on public.kunden
+  for insert to authenticated with check (true);
+create policy "kunden_update" on public.kunden
+  for update to authenticated using (true) with check (true);
 
--- Deadlines sind gemeinsame Team-Information.
-create policy "termine_all" on public.termine
-  for all to authenticated using (true) with check (true);
+create policy "projekte_select" on public.projekte
+  for select to authenticated using (true);
+create policy "projekte_insert" on public.projekte
+  for insert to authenticated with check (true);
+create policy "projekte_update" on public.projekte
+  for update to authenticated using (true) with check (true);
+
+revoke delete on public.kunden   from authenticated, anon;
+revoke delete on public.projekte from authenticated, anon;
+
+-- Deadlines sind gemeinsame Team-Information: alle dürfen alles bearbeiten.
+-- Beim Anlegen ist aber "erstellt_von" an das eigene Konto gebunden, sonst
+-- ließe sich eine Deadline unter fremdem Namen einstellen.
+create policy "termine_select" on public.termine
+  for select to authenticated using (true);
+create policy "termine_insert" on public.termine
+  for insert to authenticated
+  with check (erstellt_von is null or erstellt_von = auth.uid());
+create policy "termine_update" on public.termine
+  for update to authenticated using (true) with check (true);
+create policy "termine_delete" on public.termine
+  for delete to authenticated using (true);
 grant select, insert, update, delete on public.termine to authenticated;
 
 -- Positionen gehören zum Projekt und werden gemeinsam gepflegt.

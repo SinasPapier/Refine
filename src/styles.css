@@ -1202,6 +1202,25 @@ th {
   padding: 4px 0;
   font-size: 0.9rem;
 }
+/* Erledigt, verschwindet gleich – bleibt kurz sichtbar, damit man sieht,
+   welche Zeile man erwischt hat. */
+.offen-positionen li.wartet > span:not(.offen-rest):not(.status-urheber) {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+.offen-rest {
+  margin-left: auto;
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Wer den Status zuletzt gesetzt hat – in der Profilfarbe der Person. */
+.status-urheber {
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
 
 /* Abrechnung: Aufschlüsselung nach Tätigkeit */
 .abr-saetze { margin-top: 6px; }
