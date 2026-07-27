@@ -6,6 +6,8 @@ export interface Profile {
   email: string | null
   stundensatz: number | null
   farbe: string | null
+  status_text: string | null
+  status_gesetzt_am: string | null
   created_at: string
 }
 
@@ -51,15 +53,6 @@ export interface LaufendeZeit {
   projekt_id: string | null
   beschreibung: string | null
   gestartet_am: string
-}
-
-export interface Zustaendigkeit {
-  id: string
-  titel: string
-  beschreibung: string | null
-  gesellschafter_id: string | null
-  status: string
-  created_at: string
 }
 
 export type NummernTyp = 'kunde' | 'rechnung' | 'angebot'

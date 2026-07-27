@@ -9,7 +9,7 @@ import Dashboard from './features/auswertung/Dashboard'
 import Kalender from './features/kalender/Kalender'
 import Zeiten from './features/zeiten/Zeiten'
 import Kunden from './features/kunden/Kunden'
-import Zustaendigkeiten from './features/zustaendigkeiten/Zustaendigkeiten'
+import Team from './features/team/Team'
 import Nummern from './features/nummern/Nummern'
 import Abrechnung from './features/abrechnung/Abrechnung'
 
@@ -18,7 +18,7 @@ type View =
   | 'kalender'
   | 'zeiten'
   | 'kunden'
-  | 'zustaendigkeiten'
+  | 'team'
   | 'nummern'
   | 'abrechnung'
   | 'profil'
@@ -28,7 +28,7 @@ const NAV: { key: View; label: string; icon: string }[] = [
   { key: 'kalender', label: 'Kalender', icon: '🗓️' },
   { key: 'zeiten', label: 'Arbeitszeiten', icon: '⏱️' },
   { key: 'kunden', label: 'Kunden & Projekte', icon: '🏢' },
-  { key: 'zustaendigkeiten', label: 'Zuständigkeiten', icon: '✅' },
+  { key: 'team', label: 'Team', icon: '👥' },
   { key: 'nummern', label: 'Nummern', icon: '🔢' },
   { key: 'abrechnung', label: 'Abrechnung', icon: '🧾' },
 ]
@@ -104,7 +104,7 @@ export default function App() {
           {view === 'kalender' && <Kalender />}
           {view === 'zeiten' && <Zeiten />}
           {view === 'kunden' && <Kunden />}
-          {view === 'zustaendigkeiten' && <Zustaendigkeiten />}
+          {view === 'team' && <Team />}
           {view === 'nummern' && <Nummern />}
           {view === 'abrechnung' && <Abrechnung />}
           {view === 'profil' && <Profil />}

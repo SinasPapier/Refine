@@ -21,6 +21,9 @@ create table if not exists public.profile (
   email       text,
   stundensatz numeric,
   farbe       text default '#4f46e5',
+  -- Kurze Statusmeldung, z. B. "bis 14 Uhr beim Kunden".
+  status_text       text,
+  status_gesetzt_am timestamptz,
   created_at  timestamptz not null default now()
 );
 
@@ -81,18 +84,6 @@ create table if not exists public.laufende_zeiten (
   projekt_id        uuid references public.projekte (id) on delete set null,
   beschreibung      text,
   gestartet_am      timestamptz not null default now()
-);
-
--- ---------------------------------------------------------------------------
--- Tabelle: zustaendigkeiten
--- ---------------------------------------------------------------------------
-create table if not exists public.zustaendigkeiten (
-  id               uuid primary key default gen_random_uuid(),
-  titel            text not null,
-  beschreibung     text,
-  gesellschafter_id uuid references auth.users (id) on delete set null,
-  status           text not null default 'offen',
-  created_at       timestamptz not null default now()
 );
 
 -- ---------------------------------------------------------------------------
@@ -221,7 +212,6 @@ alter table public.profile          enable row level security;
 alter table public.kunden           enable row level security;
 alter table public.projekte         enable row level security;
 alter table public.arbeitszeiten    enable row level security;
-alter table public.zustaendigkeiten enable row level security;
 alter table public.nummernkreise    enable row level security;
 alter table public.nummern_log      enable row level security;
 alter table public.laufende_zeiten  enable row level security;
@@ -231,7 +221,7 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['kunden','projekte','zustaendigkeiten'] loop
+  foreach t in array array['kunden','projekte'] loop
     execute format('drop policy if exists "auth_all" on public.%I;', t);
     execute format(
       'create policy "auth_all" on public.%I
