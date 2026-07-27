@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../lib/supabase'
-import type { Arbeitszeit } from '../../lib/types'
+import type { Arbeitszeit, Termin } from '../../lib/types'
 import { formatDauer } from '../../lib/format'
 import {
   isoDatum,
@@ -20,6 +20,7 @@ import { useAuth } from '../auth/useAuth'
 import { useProfiles } from '../profile/ProfileProvider'
 import { useStammdaten } from '../stammdaten/StammdatenProvider'
 import ZeitDialog from '../zeiten/ZeitDialog'
+import TerminDialog from './TerminDialog'
 
 type Ansicht = 'monat' | 'woche'
 
@@ -36,6 +37,10 @@ export default function Kalender() {
   const [dialog, setDialog] = useState<null | { eintrag: Arbeitszeit | null; datum: string }>(
     null,
   )
+  const [termine, setTermine] = useState<Termin[]>([])
+  const [terminDialog, setTerminDialog] = useState<
+    null | { termin: Termin | null; datum: string }
+  >(null)
 
   // Sichtbarer Zeitraum je nach Ansicht
   const tage = useMemo(() => {
@@ -48,12 +53,17 @@ export default function Kalender() {
   const bisIso = isoDatum(tage[tage.length - 1])
 
   const laden = useCallback(async () => {
-    const { data } = await supabase
-      .from('arbeitszeiten')
-      .select('*')
-      .gte('datum', vonIso)
-      .lte('datum', bisIso)
-    setZeiten((data as Arbeitszeit[]) ?? [])
+    const [{ data: z }, { data: t }] = await Promise.all([
+      supabase.from('arbeitszeiten').select('*').gte('datum', vonIso).lte('datum', bisIso),
+      supabase
+        .from('termine')
+        .select('*')
+        .gte('datum', vonIso)
+        .lte('datum', bisIso)
+        .order('datum'),
+    ])
+    setZeiten((z as Arbeitszeit[]) ?? [])
+    setTermine((t as Termin[]) ?? [])
   }, [vonIso, bisIso])
 
   useEffect(() => {
@@ -81,6 +91,17 @@ export default function Kalender() {
     }
     return map
   }, [gefiltert])
+
+  /** Deadlines je Tag – unabhängig vom Personenfilter, sie gehören dem Team. */
+  const termineProTag = useMemo(() => {
+    const map = new Map<string, Termin[]>()
+    for (const t of termine) {
+      const liste = map.get(t.datum) ?? []
+      liste.push(t)
+      map.set(t.datum, liste)
+    }
+    return map
+  }, [termine])
 
   function summeTag(iso: string): number {
     return (proTag.get(iso) ?? []).reduce((s, z) => s + z.dauer_minuten, 0)
@@ -193,6 +214,17 @@ export default function Kalender() {
                   )}
                 </div>
                 <div className="kal-eintraege">
+                  {(termineProTag.get(iso) ?? []).map((t) => (
+                    <span
+                      key={t.id}
+                      className={`kal-deadline${t.erledigt ? ' erledigt' : ''}${
+                        !t.erledigt && iso < heuteIso() ? ' ueberfaellig' : ''
+                      }`}
+                      title={`Deadline: ${t.titel}`}
+                    >
+                      🚩 {t.titel}
+                    </span>
+                  ))}
                   {eintraege.slice(0, 3).map((z) => (
                     <span
                       key={z.id}
@@ -230,6 +262,17 @@ export default function Kalender() {
                   <strong>{eintraege.length ? formatDauer(summeTag(iso)) : '—'}</strong>
                 </div>
                 <div className="kal-spalte-inhalt">
+                  {(termineProTag.get(iso) ?? []).map((t) => (
+                    <button
+                      key={t.id}
+                      className={`kal-deadline-karte${t.erledigt ? ' erledigt' : ''}${
+                        !t.erledigt && iso < heuteIso() ? ' ueberfaellig' : ''
+                      }`}
+                      onClick={() => setTerminDialog({ termin: t, datum: t.datum })}
+                    >
+                      🚩 {t.titel}
+                    </button>
+                  ))}
                   {eintraege.map((z) => (
                     <button
                       key={z.id}
@@ -265,6 +308,12 @@ export default function Kalender() {
                   >
                     + Zeit
                   </button>
+                  <button
+                    className="kal-plus deadline"
+                    onClick={() => setTerminDialog({ termin: null, datum: iso })}
+                  >
+                    + Deadline
+                  </button>
                 </div>
               </div>
             )
@@ -283,13 +332,39 @@ export default function Kalender() {
                 year: 'numeric',
               })}
             </h2>
-            <button
-              className="btn-ghost small"
-              onClick={() => setDialog({ eintrag: null, datum: gewaehlterTag })}
-            >
-              + Zeit erfassen
-            </button>
+            <div className="aktionen">
+              <button
+                className="btn-ghost small"
+                onClick={() => setDialog({ eintrag: null, datum: gewaehlterTag })}
+              >
+                + Zeit erfassen
+              </button>
+              <button
+                className="btn-ghost small"
+                onClick={() => setTerminDialog({ termin: null, datum: gewaehlterTag })}
+              >
+                🚩 + Deadline
+              </button>
+            </div>
           </div>
+
+          {(termineProTag.get(gewaehlterTag) ?? []).length > 0 && (
+            <ul className="tag-liste deadlines">
+              {(termineProTag.get(gewaehlterTag) ?? []).map((t) => (
+                <li key={t.id}>
+                  <span>🚩</span>
+                  <span className={t.erledigt ? 'durchgestrichen' : ''}>{t.titel}</span>
+                  <span className="tag-text muted">{t.beschreibung ?? ''}</span>
+                  <button
+                    className="btn-ghost small"
+                    onClick={() => setTerminDialog({ termin: t, datum: t.datum })}
+                  >
+                    Bearbeiten
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
 
           {tagDetails.length === 0 ? (
             <p className="muted">Keine Einträge an diesem Tag.</p>
@@ -321,6 +396,15 @@ export default function Kalender() {
             </ul>
           )}
         </div>
+      )}
+
+      {terminDialog && (
+        <TerminDialog
+          termin={terminDialog.termin}
+          vorgabeDatum={terminDialog.datum}
+          onSchliessen={() => setTerminDialog(null)}
+          onGespeichert={laden}
+        />
       )}
 
       {dialog && (

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useMemo, useState, type FormEvent } from 'react'
 import { supabase } from '../../lib/supabase'
 import type { Arbeitszeit } from '../../lib/types'
 import { formatDauer, parseDauerZuMinuten } from '../../lib/format'
@@ -6,6 +6,11 @@ import { heuteIso } from '../../lib/datum'
 import { useToast } from '../../components/Toast'
 import { useAuth } from '../auth/useAuth'
 import { useStammdaten } from '../stammdaten/StammdatenProvider'
+
+/** Minuten -> "1:30" für die Eingabefelder. */
+export function minutenAlsText(m: number): string {
+  return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`
+}
 
 /**
  * Dialog zum Anlegen und Bearbeiten eines Zeiteintrags.
@@ -24,22 +29,47 @@ export default function ZeitDialog({
   onGespeichert: () => void
 }) {
   const { session } = useAuth()
-  const { aktiveProjekte, projektLabel } = useStammdaten()
+  const { aktiveProjekte, projektLabel, saetze, satzVon, istInternesProjekt } =
+    useStammdaten()
   const toast = useToast()
 
-  const [datum, setDatum] = useState(eintrag?.datum ?? vorgabeDatum ?? heuteIso())
-  const [dauer, setDauer] = useState(() => {
-    if (!eintrag) return ''
-    const m = eintrag.dauer_minuten
-    return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`
-  })
-  const [projektId, setProjektId] = useState(eintrag?.projekt_id ?? '')
-  const [beschreibung, setBeschreibung] = useState(eintrag?.beschreibung ?? '')
+  // Ausgangszustand merken, damit "Speichern" erst bei echten Änderungen greift.
+  const start = useMemo(
+    () => ({
+      datum: eintrag?.datum ?? vorgabeDatum ?? heuteIso(),
+      dauer: eintrag ? minutenAlsText(eintrag.dauer_minuten) : '',
+      projektId: eintrag?.projekt_id ?? '',
+      taetigkeit: eintrag?.taetigkeit ?? '',
+      beschreibung: eintrag?.beschreibung ?? '',
+    }),
+    [eintrag, vorgabeDatum],
+  )
+
+  const [datum, setDatum] = useState(start.datum)
+  const [dauer, setDauer] = useState(start.dauer)
+  const [projektId, setProjektId] = useState(start.projektId)
+  const [taetigkeit, setTaetigkeit] = useState(start.taetigkeit)
+  const [beschreibung, setBeschreibung] = useState(start.beschreibung)
   const [speichert, setSpeichert] = useState(false)
 
   // Ein bereits archiviertes Projekt soll beim Bearbeiten sichtbar bleiben.
   const projektFehlt =
     projektId !== '' && !aktiveProjekte.some((p) => p.id === projektId)
+
+  const veraendert =
+    datum !== start.datum ||
+    dauer.trim() !== start.dauer.trim() ||
+    projektId !== start.projektId ||
+    taetigkeit !== start.taetigkeit ||
+    beschreibung.trim() !== start.beschreibung.trim()
+
+  // Bei neuen Einträgen zählt eine ausgefüllte Dauer als Änderung.
+  const speicherbar = eintrag ? veraendert : dauer.trim().length > 0
+
+  function projektWechseln(neu: string) {
+    setProjektId(neu)
+    if (istInternesProjekt(neu)) setTaetigkeit('intern')
+  }
 
   async function speichern(e: FormEvent) {
     e.preventDefault()
@@ -56,6 +86,8 @@ export default function ZeitDialog({
       dauer_minuten: minuten,
       projekt_id: projektId || null,
       beschreibung: beschreibung.trim() || null,
+      taetigkeit: taetigkeit || null,
+      stundensatz: satzVon(taetigkeit),
     }
 
     const { error } = eintrag
@@ -101,7 +133,7 @@ export default function ZeitDialog({
 
         <label>
           Projekt
-          <select value={projektId} onChange={(e) => setProjektId(e.target.value)}>
+          <select value={projektId} onChange={(e) => projektWechseln(e.target.value)}>
             <option value="">— ohne Projekt —</option>
             {projektFehlt && (
               <option value={projektId}>{projektLabel(projektId)} (archiviert)</option>
@@ -109,6 +141,18 @@ export default function ZeitDialog({
             {aktiveProjekte.map((p) => (
               <option key={p.id} value={p.id}>
                 {projektLabel(p.id)}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label>
+          Tätigkeit / Stundensatz
+          <select value={taetigkeit} onChange={(e) => setTaetigkeit(e.target.value)}>
+            <option value="">— nicht zugeordnet —</option>
+            {saetze.map((s) => (
+              <option key={s.schluessel} value={s.schluessel}>
+                {s.bezeichnung} · {s.satz} €/Std
               </option>
             ))}
           </select>
@@ -129,7 +173,12 @@ export default function ZeitDialog({
             <button type="button" className="btn-ghost" onClick={onSchliessen}>
               Abbrechen
             </button>
-            <button className="btn-primary" type="submit" disabled={speichert}>
+            <button
+              className="btn-primary"
+              type="submit"
+              disabled={speichert || !speicherbar}
+              title={!speicherbar ? 'Es wurde nichts geändert' : undefined}
+            >
               {speichert ? 'Speichert…' : 'Speichern'}
             </button>
           </div>

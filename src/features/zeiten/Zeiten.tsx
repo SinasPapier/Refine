@@ -7,14 +7,16 @@ import { useAuth } from '../auth/useAuth'
 import { useProfiles } from '../profile/ProfileProvider'
 import { useStammdaten } from '../stammdaten/StammdatenProvider'
 import ZeitDialog from './ZeitDialog'
+import AufteilenDialog from './AufteilenDialog'
 
 export default function Zeiten() {
   const { session } = useAuth()
   const { profiles, nameVon, farbeVon } = useProfiles()
-  const { aktiveProjekte, projektLabel } = useStammdaten()
+  const { aktiveProjekte, projektLabel, bezeichnungVon } = useStammdaten()
 
   const [zeiten, setZeiten] = useState<Arbeitszeit[]>([])
   const [dialog, setDialog] = useState<null | Arbeitszeit | 'neu'>(null)
+  const [aufteilen, setAufteilen] = useState<Arbeitszeit | null>(null)
 
   const [filterPerson, setFilterPerson] = useState('')
   const [filterProjekt, setFilterProjekt] = useState('')
@@ -116,7 +118,9 @@ export default function Zeiten() {
                   <th>Person</th>
                   <th>Projekt</th>
                   <th>Beschreibung</th>
+                  <th>Tätigkeit</th>
                   <th>Dauer</th>
+                  <th>Betrag</th>
                   <th></th>
                 </tr>
               </thead>
@@ -140,12 +144,32 @@ export default function Zeiten() {
                       </td>
                       <td>{projektLabel(z.projekt_id)}</td>
                       <td>{z.beschreibung ?? '—'}</td>
+                      <td>
+                        {z.taetigkeit ? (
+                          bezeichnungVon(z.taetigkeit)
+                        ) : (
+                          <span className="muted">nicht zugeordnet</span>
+                        )}
+                      </td>
                       <td>{formatDauer(z.dauer_minuten)}</td>
+                      <td>
+                        {(((z.stundensatz ?? 0) * z.dauer_minuten) / 60).toLocaleString(
+                          'de-DE',
+                          { style: 'currency', currency: 'EUR' },
+                        )}
+                      </td>
                       <td className="aktionen">
                         {eigen && (
                           <>
                             <button className="btn-ghost small" onClick={() => setDialog(z)}>
                               Bearbeiten
+                            </button>
+                            <button
+                              className="btn-ghost small"
+                              onClick={() => setAufteilen(z)}
+                              title="Auf mehrere Tätigkeiten aufteilen"
+                            >
+                              Aufteilen
                             </button>
                             <button
                               className="btn-ghost small danger"
@@ -169,6 +193,14 @@ export default function Zeiten() {
         <ZeitDialog
           eintrag={dialog === 'neu' ? null : dialog}
           onSchliessen={() => setDialog(null)}
+          onGespeichert={laden}
+        />
+      )}
+
+      {aufteilen && (
+        <AufteilenDialog
+          eintrag={aufteilen}
+          onSchliessen={() => setAufteilen(null)}
           onGespeichert={laden}
         />
       )}

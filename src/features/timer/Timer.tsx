@@ -20,7 +20,14 @@ function stoppuhrAnzeige(sekunden: number): string {
 
 export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
   const { session } = useAuth()
-  const { aktiveProjekte, projektLabel } = useStammdaten()
+  const {
+    aktiveProjekte,
+    projektLabel,
+    saetze,
+    satzVon,
+    bezeichnungVon,
+    istInternesProjekt,
+  } = useStammdaten()
   const toast = useToast()
 
   const [laufend, setLaufend] = useState<LaufendeZeit | null>(null)
@@ -29,6 +36,7 @@ export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
 
   // Eingaben für den Start
   const [projektId, setProjektId] = useState('')
+  const [taetigkeit, setTaetigkeit] = useState('')
   const [beschreibung, setBeschreibung] = useState('')
 
   // Stopp-Dialog
@@ -39,6 +47,7 @@ export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
   }>(null)
   const [dialogDauer, setDialogDauer] = useState('')
   const [dialogProjekt, setDialogProjekt] = useState('')
+  const [dialogTaetigkeit, setDialogTaetigkeit] = useState('')
   const [dialogText, setDialogText] = useState('')
   const [speichert, setSpeichert] = useState(false)
 
@@ -82,11 +91,20 @@ export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
     return () => document.removeEventListener('visibilitychange', beiRueckkehr)
   }, [laden])
 
+  /**
+   * Projektwechsel: Bei einem internen Kunden ist "Internes" der sinnvolle
+   * Vorschlag. Eine bewusst abweichende Auswahl bleibt möglich.
+   */
+  function projektGewaehlt(neu: string, setzeTaetigkeit: (t: string) => void) {
+    if (istInternesProjekt(neu)) setzeTaetigkeit('intern')
+  }
+
   async function starten() {
     if (!uid) return
     const { error } = await supabase.from('laufende_zeiten').insert({
       gesellschafter_id: uid,
       projekt_id: projektId || null,
+      taetigkeit: taetigkeit || null,
       beschreibung: beschreibung.trim() || null,
     })
     if (error) {
@@ -105,6 +123,7 @@ export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
     setDialog({ minuten, start: laufend.gestartet_am, ende: ende.toISOString() })
     setDialogDauer(`${Math.floor(minuten / 60)}:${String(minuten % 60).padStart(2, '0')}`)
     setDialogProjekt(laufend.projekt_id ?? '')
+    setDialogTaetigkeit(laufend.taetigkeit ?? '')
     setDialogText(laufend.beschreibung ?? '')
   }
 
@@ -124,6 +143,10 @@ export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
       beschreibung: dialogText.trim() || null,
       start_zeit: dialog.start,
       end_zeit: dialog.ende,
+      taetigkeit: dialogTaetigkeit || null,
+      // Satz bewusst kopieren: spätere Satzänderungen sollen alte Buchungen
+      // nicht rückwirkend verändern.
+      stundensatz: satzVon(dialogTaetigkeit),
     })
     if (error) {
       setSpeichert(false)
@@ -162,6 +185,7 @@ export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
             <span className="timer-uhr">{stoppuhrAnzeige(sekunden)}</span>
             <span className="timer-info">
               {projektLabel(laufend.projekt_id)}
+              {laufend.taetigkeit ? ` · ${bezeichnungVon(laufend.taetigkeit)}` : ''}
               {laufend.beschreibung ? ` – ${laufend.beschreibung}` : ''}
             </span>
             <button className="btn-stop" onClick={stoppenVorbereiten}>
@@ -173,12 +197,28 @@ export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
             <select
               className="timer-projekt"
               value={projektId}
-              onChange={(e) => setProjektId(e.target.value)}
+              onChange={(e) => {
+                setProjektId(e.target.value)
+                projektGewaehlt(e.target.value, setTaetigkeit)
+              }}
             >
               <option value="">— ohne Projekt —</option>
               {aktiveProjekte.map((p) => (
                 <option key={p.id} value={p.id}>
                   {projektLabel(p.id)}
+                </option>
+              ))}
+            </select>
+            <select
+              className="timer-satz"
+              value={taetigkeit}
+              onChange={(e) => setTaetigkeit(e.target.value)}
+              title="Stundensatz"
+            >
+              <option value="">— Tätigkeit —</option>
+              {saetze.map((s) => (
+                <option key={s.schluessel} value={s.schluessel}>
+                  {s.bezeichnung} · {s.satz} €
                 </option>
               ))}
             </select>
@@ -220,12 +260,30 @@ export default function Timer({ onGebucht }: { onGebucht?: () => void }) {
               Projekt
               <select
                 value={dialogProjekt}
-                onChange={(e) => setDialogProjekt(e.target.value)}
+                onChange={(e) => {
+                  setDialogProjekt(e.target.value)
+                  projektGewaehlt(e.target.value, setDialogTaetigkeit)
+                }}
               >
                 <option value="">— ohne Projekt —</option>
                 {aktiveProjekte.map((p) => (
                   <option key={p.id} value={p.id}>
                     {projektLabel(p.id)}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              Tätigkeit / Stundensatz
+              <select
+                value={dialogTaetigkeit}
+                onChange={(e) => setDialogTaetigkeit(e.target.value)}
+              >
+                <option value="">— nicht zugeordnet —</option>
+                {saetze.map((s) => (
+                  <option key={s.schluessel} value={s.schluessel}>
+                    {s.bezeichnung} · {s.satz} €/Std
                   </option>
                 ))}
               </select>

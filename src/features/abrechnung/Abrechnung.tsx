@@ -11,8 +11,21 @@ function euro(betrag: number): string {
   return betrag.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' })
 }
 
+function stunden(minuten: number): string {
+  return formatStundenDezimal(minuten).replace('.', ',')
+}
+
+/** Eine Zeile der Aufschlüsselung: eine Tätigkeit innerhalb eines Kunden. */
+interface SatzZeile {
+  taetigkeit: string | null
+  bezeichnung: string
+  minuten: number
+  satz: number | null
+  betrag: number
+}
+
 export default function Abrechnung() {
-  const { kunden, kundeVonProjekt, projektName } = useStammdaten()
+  const { kunden, kundeVonProjekt, projektName, bezeichnungVon } = useStammdaten()
   const { nameVon } = useProfiles()
   const toast = useToast()
 
@@ -40,67 +53,84 @@ export default function Abrechnung() {
     laden()
   }, [laden])
 
-  /** Einträge nach Kunde gruppieren; "ohne" sammelt alles ohne Kundenbezug. */
+  /**
+   * Nach Kunde gruppieren und innerhalb nach Tätigkeit aufschlüsseln.
+   * Der Betrag stammt aus dem Satz, der beim Buchen im Eintrag festgehalten
+   * wurde – nicht aus dem heute gültigen Satz.
+   */
   const gruppen = useMemo(() => {
-    const map = new Map<string, Arbeitszeit[]>()
+    const nachKunde = new Map<string, Arbeitszeit[]>()
     for (const z of zeiten) {
-      const kunde = kundeVonProjekt(z.projekt_id)
-      const key = kunde?.id ?? 'ohne'
-      const liste = map.get(key) ?? []
+      const key = kundeVonProjekt(z.projekt_id)?.id ?? 'ohne'
+      const liste = nachKunde.get(key) ?? []
       liste.push(z)
-      map.set(key, liste)
+      nachKunde.set(key, liste)
     }
-    return [...map.entries()]
+
+    return [...nachKunde.entries()]
       .map(([kundeId, eintraege]) => {
         const kunde: Kunde | null =
           kundeId === 'ohne' ? null : kunden.find((k) => k.id === kundeId) ?? null
-        const minuten = eintraege.reduce((s, z) => s + z.dauer_minuten, 0)
-        const satz = kunde?.stundensatz ?? null
-        return {
-          kundeId,
-          kunde,
-          eintraege,
-          minuten,
-          satz,
-          betrag: satz != null ? (minuten / 60) * satz : null,
+
+        const nachSatz = new Map<string, SatzZeile>()
+        for (const z of eintraege) {
+          const key = z.taetigkeit ?? '—'
+          const zeile =
+            nachSatz.get(key) ??
+            ({
+              taetigkeit: z.taetigkeit,
+              bezeichnung: z.taetigkeit ? bezeichnungVon(z.taetigkeit) : 'nicht zugeordnet',
+              minuten: 0,
+              satz: z.stundensatz,
+              betrag: 0,
+            } satisfies SatzZeile)
+          zeile.minuten += z.dauer_minuten
+          // Innerhalb einer Tätigkeit können unterschiedliche Sätze stecken,
+          // wenn der Satz zwischenzeitlich geändert wurde. Darum je Eintrag
+          // rechnen statt am Ende pauschal.
+          zeile.betrag += ((z.stundensatz ?? 0) * z.dauer_minuten) / 60
+          if (zeile.satz !== z.stundensatz) zeile.satz = null
+          nachSatz.set(key, zeile)
         }
+
+        const zeilen = [...nachSatz.values()].sort((a, b) => b.minuten - a.minuten)
+        const minuten = eintraege.reduce((s, z) => s + z.dauer_minuten, 0)
+        const betrag = zeilen.reduce((s, z) => s + z.betrag, 0)
+        const ohneTaetigkeit = zeilen.some((z) => z.taetigkeit === null)
+
+        return { kundeId, kunde, eintraege, zeilen, minuten, betrag, ohneTaetigkeit }
       })
-      .sort((a, b) => b.minuten - a.minuten)
-  }, [zeiten, kunden, kundeVonProjekt])
+      .sort((a, b) => b.betrag - a.betrag || b.minuten - a.minuten)
+  }, [zeiten, kunden, kundeVonProjekt, bezeichnungVon])
 
   const gesamtMinuten = zeiten.reduce((s, z) => s + z.dauer_minuten, 0)
-  const gesamtBetrag = gruppen.reduce((s, g) => s + (g.betrag ?? 0), 0)
+  const gesamtBetrag = gruppen.reduce((s, g) => s + g.betrag, 0)
 
   /** Positionen als Text für die Rechnung in Word. */
   async function kopieren(gruppe: (typeof gruppen)[number]) {
-    const kopf = `${gruppe.kunde?.name ?? 'Ohne Kunde'} – ${
-      MONATE[anker.getMonth()]
-    } ${anker.getFullYear()}`
+    const zeilen: string[] = [
+      `${gruppe.kunde?.name ?? 'Ohne Kunde'} – ${MONATE[anker.getMonth()]} ${anker.getFullYear()}`,
+      '',
+    ]
 
-    // Nach Projekt zusammenfassen, das ist die übliche Rechnungsstruktur.
-    const proProjekt = new Map<string, number>()
-    for (const z of gruppe.eintraege) {
-      const name = projektName(z.projekt_id)
-      proProjekt.set(name, (proProjekt.get(name) ?? 0) + z.dauer_minuten)
+    for (const z of gruppe.zeilen) {
+      // Je Tätigkeit die beteiligten Projekte nennen – so liest sich die
+      // Rechnung nachvollziehbar.
+      const projekte = [
+        ...new Set(
+          gruppe.eintraege
+            .filter((e) => (e.taetigkeit ?? null) === z.taetigkeit)
+            .map((e) => projektName(e.projekt_id)),
+        ),
+      ].join(', ')
+      const satzText = z.satz != null ? `\t${euro(z.satz)}` : '\t'
+      zeilen.push(`${z.bezeichnung} (${projekte})\t${stunden(z.minuten)} Std${satzText}\t${euro(z.betrag)}`)
     }
 
-    const zeilen = [...proProjekt.entries()].map(([name, min]) => {
-      const stunden = formatStundenDezimal(min).replace('.', ',')
-      if (gruppe.satz != null) {
-        return `${name}\t${stunden} Std\t${euro(gruppe.satz)}\t${euro((min / 60) * gruppe.satz)}`
-      }
-      return `${name}\t${stunden} Std`
-    })
-
-    const summe =
-      gruppe.betrag != null
-        ? `Gesamt\t${formatStundenDezimal(gruppe.minuten).replace('.', ',')} Std\t\t${euro(gruppe.betrag)}`
-        : `Gesamt\t${formatStundenDezimal(gruppe.minuten).replace('.', ',')} Std`
-
-    const text = [kopf, '', ...zeilen, '', summe].join('\n')
+    zeilen.push('', `Gesamt\t${stunden(gruppe.minuten)} Std\t\t${euro(gruppe.betrag)}`)
 
     try {
-      await navigator.clipboard.writeText(text)
+      await navigator.clipboard.writeText(zeilen.join('\n'))
       toast('Positionen in die Zwischenablage kopiert.')
     } catch {
       toast('Kopieren nicht möglich.', 'fehler')
@@ -111,8 +141,8 @@ export default function Abrechnung() {
     <div>
       <h1>Abrechnung</h1>
       <p className="muted">
-        Stunden je Kunde für einen Monat – als Vorlage für deine Rechnung.
-        Ein Betrag erscheint, sobald beim Kunden ein Stundensatz hinterlegt ist.
+        Stunden je Kunde für einen Monat, aufgeschlüsselt nach Tätigkeit – als
+        Vorlage für deine Rechnung.
       </p>
 
       <div className="kal-kopf">
@@ -129,7 +159,12 @@ export default function Abrechnung() {
         </div>
         <div className="abrechnung-summe">
           Gesamt: <strong>{formatDauer(gesamtMinuten)}</strong>
-          {gesamtBetrag > 0 && <> · <strong>{euro(gesamtBetrag)}</strong></>}
+          {gesamtBetrag > 0 && (
+            <>
+              {' '}
+              · <strong>{euro(gesamtBetrag)}</strong>
+            </>
+          )}
         </div>
       </div>
 
@@ -140,16 +175,18 @@ export default function Abrechnung() {
           <div className="card" key={g.kundeId}>
             <div className="abr-kopf">
               <div>
-                <h2>{g.kunde?.name ?? 'Ohne Kundenzuordnung'}</h2>
+                <h2>
+                  {g.kunde?.name ?? 'Ohne Kundenzuordnung'}
+                  {g.kunde?.intern && <span className="tag-intern">intern</span>}
+                </h2>
                 <div className="muted small">
                   {g.kunde?.kundennummer ? `${g.kunde.kundennummer} · ` : ''}
-                  {formatStundenDezimal(g.minuten).replace('.', ',')} Std
-                  {g.satz != null && ` · ${euro(g.satz)}/Std`}
+                  {stunden(g.minuten)} Std
                 </div>
               </div>
               <div className="abr-rechts">
                 <div className="abr-betrag">
-                  {g.betrag != null ? euro(g.betrag) : formatDauer(g.minuten)}
+                  {g.betrag > 0 ? euro(g.betrag) : formatDauer(g.minuten)}
                 </div>
                 <div className="abr-knoepfe">
                   <button className="btn-ghost small" onClick={() => kopieren(g)}>
@@ -165,10 +202,34 @@ export default function Abrechnung() {
               </div>
             </div>
 
-            {g.satz == null && g.kunde && (
+            {/* Aufschlüsselung nach Tätigkeit */}
+            <div className="table-wrap">
+              <table className="abr-saetze">
+                <tbody>
+                  {g.zeilen.map((z) => (
+                    <tr key={z.taetigkeit ?? 'ohne'} className={z.taetigkeit ? '' : 'unzugeordnet'}>
+                      <td>{z.bezeichnung}</td>
+                      <td>{stunden(z.minuten)} Std</td>
+                      <td>
+                        {z.taetigkeit == null
+                          ? '—'
+                          : z.satz != null
+                            ? `${euro(z.satz)}/Std`
+                            : 'gemischte Sätze'}
+                      </td>
+                      <td className="rechts">
+                        <strong>{euro(z.betrag)}</strong>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {g.ohneTaetigkeit && (
               <p className="muted small">
-                Kein Stundensatz hinterlegt – unter „Kunden &amp; Projekte" kannst du
-                einen eintragen, dann wird hier auch der Betrag berechnet.
+                Einträge ohne Tätigkeit werden mit 0 € geführt. Du kannst sie unter
+                „Arbeitszeiten" nachträglich zuordnen oder aufteilen.
               </p>
             )}
 
@@ -179,9 +240,11 @@ export default function Abrechnung() {
                     <tr>
                       <th>Datum</th>
                       <th>Projekt</th>
+                      <th>Tätigkeit</th>
                       <th>Beschreibung</th>
                       <th>Person</th>
                       <th>Dauer</th>
+                      <th>Betrag</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -189,9 +252,11 @@ export default function Abrechnung() {
                       <tr key={z.id}>
                         <td>{formatDatum(z.datum)}</td>
                         <td>{projektName(z.projekt_id)}</td>
+                        <td>{z.taetigkeit ? bezeichnungVon(z.taetigkeit) : '—'}</td>
                         <td>{z.beschreibung ?? '—'}</td>
                         <td>{nameVon(z.gesellschafter_id)}</td>
                         <td>{formatDauer(z.dauer_minuten)}</td>
+                        <td>{euro(((z.stundensatz ?? 0) * z.dauer_minuten) / 60)}</td>
                       </tr>
                     ))}
                   </tbody>

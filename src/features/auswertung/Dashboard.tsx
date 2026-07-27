@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../lib/supabase'
-import type { Arbeitszeit, LaufendeZeit } from '../../lib/types'
+import type { Arbeitszeit, LaufendeZeit, Termin } from '../../lib/types'
 import { formatDauer } from '../../lib/format'
-import { isoDatum } from '../../lib/datum'
+import { formatDatum } from '../../lib/format'
+import { heuteIso, isoDatum } from '../../lib/datum'
 import { useProfiles } from '../profile/ProfileProvider'
 import { useStammdaten } from '../stammdaten/StammdatenProvider'
 
@@ -10,18 +11,28 @@ type Zeitraum = 'monat' | 'jahr' | 'alle'
 
 export default function Dashboard() {
   const { profiles, nameVon, farbeVon } = useProfiles()
-  const { kunden, kundeVonProjekt } = useStammdaten()
+  const { kunden, kundeVonProjekt, projektLabel } = useStammdaten()
   const [zeiten, setZeiten] = useState<Arbeitszeit[]>([])
   const [laufende, setLaufende] = useState<LaufendeZeit[]>([])
+  const [termine, setTermine] = useState<Termin[]>([])
   const [zeitraum, setZeitraum] = useState<Zeitraum>('monat')
 
   useEffect(() => {
     Promise.all([
       supabase.from('arbeitszeiten').select('*'),
       supabase.from('laufende_zeiten').select('*'),
-    ]).then(([z, l]) => {
+      // Offene Deadlines ab heute, die nächsten zuerst.
+      supabase
+        .from('termine')
+        .select('*')
+        .eq('erledigt', false)
+        .gte('datum', heuteIso())
+        .order('datum')
+        .limit(5),
+    ]).then(([z, l, t]) => {
       setZeiten((z.data as Arbeitszeit[]) ?? [])
       setLaufende((l.data as LaufendeZeit[]) ?? [])
+      setTermine((t.data as Termin[]) ?? [])
     })
   }, [])
 
@@ -105,6 +116,23 @@ export default function Dashboard() {
           <div className="kpi-value">{profiles.length}</div>
         </div>
       </div>
+
+      {termine.length > 0 && (
+        <div className="card">
+          <h2>Nächste Deadlines</h2>
+          <ul className="deadline-liste">
+            {termine.map((t) => (
+              <li key={t.id}>
+                <span className="deadline-datum">{formatDatum(t.datum)}</span>
+                <span className="deadline-titel">{t.titel}</span>
+                <span className="muted small">
+                  {t.projekt_id ? projektLabel(t.projekt_id) : ''}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="dash-grid">
         <div className="card">

@@ -24,6 +24,8 @@ create table if not exists public.profile (
   -- Kurze Statusmeldung, z. B. "bis 14 Uhr beim Kunden".
   status_text       text,
   status_gesetzt_am timestamptz,
+  -- Darf Nummernkreise und Stundensätze ändern.
+  ist_admin   boolean not null default false,
   created_at  timestamptz not null default now()
 );
 
@@ -39,7 +41,8 @@ create table if not exists public.kunden (
   telefon        text,
   adresse        text,
   notiz          text,
-  stundensatz    numeric,
+  -- Interne Kunden belegen die Tätigkeit automatisch mit "Internes" vor.
+  intern         boolean not null default false,
   archiviert     boolean not null default false,
   created_at     timestamptz not null default now()
 );
@@ -70,6 +73,10 @@ create table if not exists public.arbeitszeiten (
   -- Tatsächliche Start-/Endzeit, wenn der Eintrag von der Stoppuhr stammt.
   start_zeit       timestamptz,
   end_zeit         timestamptz,
+  -- Tätigkeit und der dabei gültige Satz. Der Satz wird beim Buchen
+  -- hineinkopiert, damit spätere Satzänderungen alte Zeiten nicht verändern.
+  taetigkeit       text,
+  stundensatz      numeric,
   created_at       timestamptz not null default now()
 );
 
@@ -83,6 +90,7 @@ create table if not exists public.laufende_zeiten (
   gesellschafter_id uuid primary key references auth.users (id) on delete cascade,
   projekt_id        uuid references public.projekte (id) on delete set null,
   beschreibung      text,
+  taetigkeit        text,
   gestartet_am      timestamptz not null default now()
 );
 
@@ -106,6 +114,37 @@ values
   ('rechnung', 'RE-', true,  true,  4),
   ('angebot',  'AN-', true,  true,  4)
 on conflict (typ) do nothing;
+
+-- ---------------------------------------------------------------------------
+-- Tabelle: stundensaetze (gelten einheitlich für alle Gesellschafter)
+-- ---------------------------------------------------------------------------
+create table if not exists public.stundensaetze (
+  schluessel  text primary key,
+  bezeichnung text not null,
+  satz        numeric not null default 0,
+  sortierung  integer not null default 0
+);
+
+insert into public.stundensaetze (schluessel, bezeichnung, satz, sortierung)
+values
+  ('beratung',   'Beratung',   80, 1),
+  ('gestaltung', 'Gestaltung', 60, 2),
+  ('intern',     'Internes',    0, 3)
+on conflict (schluessel) do nothing;
+
+-- ---------------------------------------------------------------------------
+-- Tabelle: termine (Deadlines im Kalender)
+-- ---------------------------------------------------------------------------
+create table if not exists public.termine (
+  id           uuid primary key default gen_random_uuid(),
+  titel        text not null,
+  datum        date not null,
+  projekt_id   uuid references public.projekte (id) on delete set null,
+  beschreibung text,
+  erledigt     boolean not null default false,
+  erstellt_von uuid references auth.users (id) on delete set null,
+  created_at   timestamptz not null default now()
+);
 
 -- ---------------------------------------------------------------------------
 -- Tabelle: nummern_log (Dokumentation aller erzeugten Nummern)
@@ -206,6 +245,31 @@ create trigger on_auth_user_created
   for each row execute function public.handle_new_user();
 
 -- ============================================================================
+-- Hilfsfunktion: Administrator? Wird in den Sicherheitsregeln verwendet.
+-- "security definer", weil die Regeln sonst wieder auf profile zugreifen
+-- müssten.
+-- ============================================================================
+create or replace function public.ist_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce((select ist_admin from public.profile where id = auth.uid()), false);
+$$;
+
+revoke all on function public.ist_admin() from public;
+revoke all on function public.ist_admin() from anon;
+grant execute on function public.ist_admin() to authenticated;
+
+-- Das zuerst angelegte Konto wird Administrator, falls es noch keinen gibt.
+update public.profile
+   set ist_admin = true
+ where id = (select id from public.profile order by created_at limit 1)
+   and not exists (select 1 from public.profile where ist_admin);
+
+-- ============================================================================
 -- Row Level Security: alle Daten nur für eingeloggte Nutzer sichtbar/änderbar
 -- ============================================================================
 alter table public.profile          enable row level security;
@@ -215,6 +279,8 @@ alter table public.arbeitszeiten    enable row level security;
 alter table public.nummernkreise    enable row level security;
 alter table public.nummern_log      enable row level security;
 alter table public.laufende_zeiten  enable row level security;
+alter table public.stundensaetze    enable row level security;
+alter table public.termine          enable row level security;
 
 -- Gemeinsam genutzte Stammdaten: alle Angemeldeten dürfen alles bearbeiten.
 do $$
@@ -247,6 +313,9 @@ drop policy if exists "timer_select" on public.laufende_zeiten;
 drop policy if exists "timer_insert" on public.laufende_zeiten;
 drop policy if exists "timer_update" on public.laufende_zeiten;
 drop policy if exists "timer_delete" on public.laufende_zeiten;
+drop policy if exists "saetze_select" on public.stundensaetze;
+drop policy if exists "saetze_update" on public.stundensaetze;
+drop policy if exists "termine_all"   on public.termine;
 
 -- Arbeitszeiten: alle sehen alles, bearbeiten nur die eigenen Einträge.
 create policy "zeiten_select" on public.arbeitszeiten
@@ -273,6 +342,14 @@ create policy "profile_update" on public.profile
   using (id = auth.uid())
   with check (id = auth.uid());
 
+-- WICHTIG: "ist_admin" ist bewusst nicht dabei. Sonst könnte sich jedes Konto
+-- selbst zum Administrator machen und alle Sperren umgehen. Gesetzt wird das
+-- Kennzeichen nur direkt in der Datenbank.
+revoke update on public.profile from authenticated;
+revoke update on public.profile from anon;
+grant update (name, farbe, status_text, status_gesetzt_am)
+  on public.profile to authenticated;
+
 -- Nummern-Protokoll: nur lesen – Einträge entstehen ausschließlich über
 -- next_nummer und bleiben damit unveränderlich (revisionssicher).
 create policy "log_select" on public.nummern_log
@@ -282,8 +359,27 @@ create policy "log_select" on public.nummern_log
 create policy "kreise_select" on public.nummernkreise
   for select to authenticated using (true);
 
+-- Zähler und Format nur für Administratoren – so lassen sich bestehende
+-- Nummern einpflegen, ohne dass jemand die Nummernfolge versehentlich
+-- zerschießt.
 create policy "kreise_update" on public.nummernkreise
-  for update to authenticated using (true) with check (true);
+  for update to authenticated using (public.ist_admin()) with check (public.ist_admin());
+
+-- Stundensätze: lesen alle, ändern nur Administratoren.
+create policy "saetze_select" on public.stundensaetze
+  for select to authenticated using (true);
+
+create policy "saetze_update" on public.stundensaetze
+  for update to authenticated using (public.ist_admin()) with check (public.ist_admin());
+
+grant select on public.stundensaetze to authenticated;
+grant update (bezeichnung, satz) on public.stundensaetze to authenticated;
+
+-- Deadlines sind gemeinsame Team-Information: alle dürfen sie pflegen.
+create policy "termine_all" on public.termine
+  for all to authenticated using (true) with check (true);
+
+grant select, insert, update, delete on public.termine to authenticated;
 
 -- Stoppuhr: alle sehen, wer gerade arbeitet – starten/stoppen nur die eigene.
 create policy "timer_select" on public.laufende_zeiten
@@ -304,8 +400,22 @@ create policy "timer_delete" on public.laufende_zeiten
 -- Supabase-Einstellung "Automatically expose new tables" funktioniert.
 grant select, insert, update, delete on public.laufende_zeiten to authenticated;
 
--- Spaltengenau: "zaehler" und "jahr" lassen sich nicht von Hand ändern.
+-- Die Policy oben ist das eigentliche Tor: nur Administratoren kommen durch.
 revoke update on public.nummernkreise from authenticated;
 revoke update on public.nummernkreise from anon;
-grant update (praefix, mit_jahr, reset_pro_jahr, stellen)
+grant update (praefix, mit_jahr, reset_pro_jahr, stellen, zaehler, jahr)
   on public.nummernkreise to authenticated;
+
+-- ============================================================================
+-- Startdaten: ein interner Kunde als Ausgangspunkt (umbenennbar)
+-- ============================================================================
+insert into public.kunden (name, intern)
+select 'Intern', true
+where not exists (select 1 from public.kunden where intern);
+
+insert into public.projekte (kunde_id, name)
+select k.id, 'Refine'
+  from public.kunden k
+ where k.intern
+   and not exists (select 1 from public.projekte p where p.kunde_id = k.id)
+ limit 1;
