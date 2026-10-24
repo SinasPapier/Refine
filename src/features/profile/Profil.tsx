@@ -1,6 +1,8 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { supabase } from '../../lib/supabase'
+import type { Firma } from '../../lib/types'
 import { FARBEN, STANDARD_FARBE } from '../../lib/types'
+import { ibanNormalisieren, ibanPruefsummeStimmt } from '../../lib/girocode'
 import { useToast } from '../../components/Toast'
 import { useAuth } from '../auth/useAuth'
 import { useProfiles } from './ProfileProvider'
@@ -166,6 +168,145 @@ export default function Profil({
     <div>
       <h1>Einstellungen</h1>
       <div className="card">{inhalt}</div>
+      <FirmaKarte istAdmin={meinProfil?.ist_admin ?? false} />
+    </div>
+  )
+}
+
+/**
+ * Firmen- und Bankdaten für den Zahlcode. Ändern darf sie nur ein
+ * Administrator – eine falsche IBAN hier beträfe jede Rechnung. Die Datenbank
+ * setzt das ebenfalls durch; das Ausblenden der Felder ist nur die Anzeige.
+ */
+function FirmaKarte({ istAdmin }: { istAdmin: boolean }) {
+  const toast = useToast()
+  const [firma, setFirma] = useState<Firma | null>(null)
+  const [name, setName] = useState('')
+  const [iban, setIban] = useState('')
+  const [bic, setBic] = useState('')
+  const [speichert, setSpeichert] = useState(false)
+
+  const laden = useCallback(async () => {
+    const { data } = await supabase.from('firma').select('*').eq('id', 1).maybeSingle()
+    const f = (data as Firma) ?? null
+    setFirma(f)
+    setName(f?.empfaenger_name ?? '')
+    setIban(f?.iban ?? '')
+    setBic(f?.bic ?? '')
+  }, [])
+
+  useEffect(() => {
+    laden()
+  }, [laden])
+
+  const veraendert =
+    name.trim() !== (firma?.empfaenger_name ?? '').trim() ||
+    ibanNormalisieren(iban) !== ibanNormalisieren(firma?.iban ?? '') ||
+    bic.trim().toUpperCase() !== (firma?.bic ?? '').trim().toUpperCase()
+
+  // Nur melden, was der Benutzer gerade eingetippt hat – leere Felder beim
+  // ersten Einrichten sollen nicht sofort rot sein.
+  const ibanFehler =
+    iban.trim() && !ibanPruefsummeStimmt(iban)
+      ? 'IBAN ist ungültig – bitte auf Tippfehler prüfen.'
+      : null
+
+  async function speichern(e: FormEvent) {
+    e.preventDefault()
+    setSpeichert(true)
+    const { error } = await supabase
+      .from('firma')
+      .update({
+        empfaenger_name: name.trim(),
+        iban: ibanNormalisieren(iban),
+        bic: bic.trim().toUpperCase(),
+        aktualisiert_am: new Date().toISOString(),
+      })
+      .eq('id', 1)
+    setSpeichert(false)
+    if (error) {
+      toast('Speichern fehlgeschlagen.', 'fehler')
+      return
+    }
+    toast('Bankverbindung gespeichert.')
+    laden()
+  }
+
+  return (
+    <div className="card">
+      <h2>Firma &amp; Bankverbindung</h2>
+      <p className="muted small">
+        Grundlage für den Zahlcode auf Rechnungen. Der Empfängername muss zum
+        Konto passen, sonst weist die Bank die Überweisung zurück.
+      </p>
+
+      {!istAdmin ? (
+        <>
+          <p className="muted small">
+            Ändern kann das nur ein Administrator – so bleibt die
+            Bankverbindung auf allen Rechnungen verlässlich.
+          </p>
+          <div className="zahlcode-empfaenger">
+            <div>
+              <span className="muted small">Empfänger</span>
+              <div>{firma?.empfaenger_name || '—'}</div>
+            </div>
+            <div>
+              <span className="muted small">IBAN</span>
+              <div>
+                <code>{firma?.iban || '—'}</code>
+              </div>
+            </div>
+          </div>
+        </>
+      ) : (
+        <form onSubmit={speichern}>
+          <div className="form-grid">
+            <label className="wide">
+              Empfängername (wie beim Konto)
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="z. B. Musteragentur GbR"
+                maxLength={70}
+              />
+            </label>
+            <label>
+              IBAN
+              <input
+                value={iban}
+                onChange={(e) => setIban(e.target.value)}
+                placeholder="DE89 3704 0044 0532 0130 00"
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </label>
+            <label>
+              BIC (optional)
+              <input
+                value={bic}
+                onChange={(e) => setBic(e.target.value)}
+                placeholder="COBADEFFXXX"
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </label>
+          </div>
+
+          {ibanFehler && <div className="fehler">{ibanFehler}</div>}
+
+          <div className="form-actions">
+            <button
+              className="btn-primary"
+              type="submit"
+              disabled={speichert || !veraendert || !!ibanFehler}
+              title={!veraendert ? 'Es wurde nichts geändert' : undefined}
+            >
+              {speichert ? 'Speichert…' : 'Speichern'}
+            </button>
+          </div>
+        </form>
+      )}
     </div>
   )
 }

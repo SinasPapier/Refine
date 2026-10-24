@@ -12,6 +12,7 @@ import Kunden from './features/kunden/Kunden'
 import Team from './features/team/Team'
 import Nummern from './features/nummern/Nummern'
 import Abrechnung from './features/abrechnung/Abrechnung'
+import Zahlcode from './features/zahlcode/Zahlcode'
 
 type View =
   | 'dashboard'
@@ -21,6 +22,7 @@ type View =
   | 'team'
   | 'nummern'
   | 'abrechnung'
+  | 'zahlcode'
   | 'profil'
 
 const NAV: { key: View; label: string; icon: string }[] = [
@@ -31,6 +33,7 @@ const NAV: { key: View; label: string; icon: string }[] = [
   { key: 'team', label: 'Team', icon: '👥' },
   { key: 'nummern', label: 'Nummern', icon: '🔢' },
   { key: 'abrechnung', label: 'Abrechnung', icon: '🧾' },
+  { key: 'zahlcode', label: 'Zahlcode', icon: '💳' },
 ]
 
 function NichtKonfiguriert() {
@@ -107,6 +110,7 @@ export default function App() {
           {view === 'team' && <Team />}
           {view === 'nummern' && <Nummern />}
           {view === 'abrechnung' && <Abrechnung />}
+          {view === 'zahlcode' && <Zahlcode />}
           {view === 'profil' && <Profil />}
         </div>
       </main>
