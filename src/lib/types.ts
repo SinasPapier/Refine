@@ -155,6 +155,15 @@ export interface NummernLog {
   notiz: string | null
 }
 
+/** Eigene Firmen- und Bankdaten – genau eine Zeile, Kennung immer 1. */
+export interface Firma {
+  id: number
+  empfaenger_name: string
+  iban: string
+  bic: string
+  aktualisiert_am: string | null
+}
+
 /** Auswahlfarben für die Gesellschafter (Kalender, Auswertungen). */
 export const FARBEN = [
   '#4f46e5', // Indigo

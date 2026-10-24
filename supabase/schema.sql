@@ -171,6 +171,23 @@ create table if not exists public.nummern_log (
   notiz       text
 );
 
+-- Die eigenen Firmen- und Bankdaten für den Zahlcode (GiroCode) auf
+-- Rechnungen. Genau eine Zeile; "id" ist fest auf 1 gesetzt, damit nicht
+-- versehentlich mehrere Datensätze entstehen.
+--
+-- Bewusst hier und nicht als Umgebungsvariable: Umgebungsvariablen landen beim
+-- Bauen im öffentlichen JavaScript der GitHub-Pages-Seite. Das Repository ist
+-- öffentlich – die Bankverbindung wäre damit für jeden lesbar. In der Tabelle
+-- sehen sie nur Angemeldete.
+create table if not exists public.firma (
+  id               integer primary key default 1 check (id = 1),
+  empfaenger_name  text not null default '',
+  iban             text not null default '',
+  bic              text not null default '',
+  aktualisiert_am  timestamptz
+);
+
+
 
 -- ############################################################################
 -- 2) NACHRÜSTUNG
@@ -258,6 +275,10 @@ on conflict (schluessel) do nothing;
 insert into public.kunden (name, intern)
 select 'Intern', true
 where not exists (select 1 from public.kunden where intern);
+
+-- Die eine Firmenzeile anlegen, falls noch nicht vorhanden. Leer – die Daten
+-- trägt ein Administrator unter Einstellungen ein.
+insert into public.firma (id) values (1) on conflict (id) do nothing;
 
 insert into public.projekte (kunde_id, name)
 select k.id, 'Refine'
@@ -514,6 +535,7 @@ alter table public.nummernkreise   enable row level security;
 alter table public.nummern_log     enable row level security;
 alter table public.positionen      enable row level security;
 alter table public.projekt_notizen enable row level security;
+alter table public.firma           enable row level security;
 
 -- Alte Regeln entfernen, damit dieses Skript wiederholt ausführbar bleibt.
 do $$
@@ -638,6 +660,21 @@ grant select on public.stundensaetze to authenticated;
 revoke update on public.stundensaetze from authenticated;
 revoke update on public.stundensaetze from anon;
 grant update (bezeichnung, satz) on public.stundensaetze to authenticated;
+
+-- Firmen- und Bankdaten: lesen alle Angemeldeten (die App braucht sie für den
+-- Zahlcode), ändern nur Administratoren. Eine falsche IBAN hier träfe jede
+-- Rechnung – deshalb dieselbe Schranke wie bei Stundensätzen und Nummern.
+--
+-- Kein insert und kein delete: Die eine Zeile entsteht beim Einrichten und
+-- bleibt. Dadurch kann niemand eine zweite Firma anlegen, die die App dann
+-- zufällig statt der richtigen lädt.
+create policy "firma_select" on public.firma
+  for select to authenticated using (true);
+create policy "firma_update" on public.firma
+  for update to authenticated using (public.ist_admin()) with check (public.ist_admin());
+grant select on public.firma to authenticated;
+revoke insert, update, delete on public.firma from authenticated, anon;
+grant update (empfaenger_name, iban, bic, aktualisiert_am) on public.firma to authenticated;
 
 -- Nummern-Protokoll: Einträge entstehen ausschließlich über next_nummer.
 -- Nachträglich ist nur die Notiz änderbar – Nummer, Typ und Zeitpunkt bleiben

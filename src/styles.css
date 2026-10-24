@@ -498,6 +498,81 @@ th {
   color: #a16207;
 }
 
+/* ---------- Zahlcode (GiroCode) ---------- */
+.zahlcode-raster {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 18px;
+  align-items: start;
+}
+.zahlcode-vorschau {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.zahlcode-vorschau h2 {
+  align-self: flex-start;
+}
+.zahlcode-empfaenger {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  font-size: 0.92rem;
+}
+/* Weißer Rahmen um den Code: Die Ruhezone steckt zwar im SVG, aber auf
+   farbigem Untergrund soll ringsum sichtbar Weiß bleiben. */
+.qr-rahmen {
+  background: #fff;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.qr-svg {
+  display: block;
+  /* Mindestens 25 mm im Druck; am Bildschirm etwas größer zum Scannen. */
+  width: 60mm;
+  height: 60mm;
+  max-width: 100%;
+}
+.qr-beschriftung {
+  margin: 0;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.qr-rohdaten {
+  width: 100%;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.qr-rohdaten summary {
+  cursor: pointer;
+}
+.qr-rohdaten pre {
+  background: #f6f7f9;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  /* Leere Zeilen der Nutzdaten sollen sichtbar bleiben. */
+  white-space: pre;
+}
+
+@media (max-width: 820px) {
+  .zahlcode-raster { grid-template-columns: 1fr; }
+  .qr-svg { width: 48mm; height: 48mm; }
+}
+
+@media print {
+  /* Im Druck zählt nur der Code selbst – schwarz auf weiß, 30 mm. */
+  .qr-svg { width: 30mm; height: 30mm; }
+  .qr-rohdaten, .zahlcode-raster .card:first-child { display: none; }
+}
+
 /* ---------- Toast ---------- */
 .toast-container {
   position: fixed;
