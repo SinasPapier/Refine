@@ -74,7 +74,7 @@ export default function Zahlcode() {
   const firmaFehlt = !laden && (!firma?.empfaenger_name?.trim() || !firma?.iban?.trim())
 
   function herunterladen() {
-    const svg = qrSvgText(payload)
+    const svg = qrSvgText(payload, { ruhezone: 0 })
     const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }))
     const a = document.createElement('a')
     a.href = url
@@ -126,7 +126,7 @@ export default function Zahlcode() {
               Rechnungsnummer
               <input
                 list="rechnungsnummern"
-                placeholder="z. B. RE-2026-0042"
+                placeholder="z. B. R-2026-0042"
                 value={rechnungsnummer}
                 onChange={(e) => setRechnungsnummer(e.target.value)}
               />

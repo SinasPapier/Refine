@@ -260,7 +260,7 @@ drop table if exists public.zustaendigkeiten;
 insert into public.nummernkreise (typ, praefix, mit_jahr, reset_pro_jahr, stellen)
 values
   ('kunde',    'K-',  false, false, 4),
-  ('rechnung', 'RE-', true,  true,  4),
+  ('rechnung', 'R-',  true,  true,  4),
   ('angebot',  'AN-', true,  true,  4)
 on conflict (typ) do nothing;
 

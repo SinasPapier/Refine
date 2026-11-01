@@ -22,12 +22,12 @@ interface Matrix {
 }
 
 /** Baut aus den dunklen Modulen einen einzigen SVG-Pfad. */
-function pfadAus(matrix: Matrix): string {
+function pfadAus(matrix: Matrix, ruhezone: number): string {
   const teile: string[] = []
   for (let y = 0; y < matrix.size; y++) {
     for (let x = 0; x < matrix.size; x++) {
       if (matrix.data[y * matrix.size + x]) {
-        teile.push(`M${x + RUHEZONE} ${y + RUHEZONE}h1v1h-1z`)
+        teile.push(`M${x + ruhezone} ${y + ruhezone}h1v1h-1z`)
       }
     }
   }
@@ -41,18 +41,25 @@ export interface QrBild {
 }
 
 /** Erzeugt Pfad und Maß – ohne React, damit es auch zum Herunterladen taugt. */
-export function qrBildErzeugen(text: string): QrBild {
+export function qrBildErzeugen(text: string, ruhezone = RUHEZONE): QrBild {
   const qr = QRCode.create(text, { errorCorrectionLevel: 'M' })
   const matrix = qr.modules as unknown as Matrix
   return {
-    kante: matrix.size + RUHEZONE * 2,
-    pfad: pfadAus(matrix),
+    kante: matrix.size + ruhezone * 2,
+    pfad: pfadAus(matrix, ruhezone),
   }
 }
 
-/** Vollständiges SVG als Text – für den Download und zum Einfügen in Word. */
-export function qrSvgText(text: string, kantenlaengeMm = 30): string {
-  const { kante, pfad } = qrBildErzeugen(text)
+/**
+ * Vollständiges SVG als Text – für den Download und zum Einfügen in Word.
+ * Mit `ruhezone: 0` ist es der nackte Code; der Rand muss dann im Zieldokument
+ * (z. B. weiße Fläche oder Abstand zum Text) selbst freigehalten werden.
+ */
+export function qrSvgText(
+  text: string,
+  { kantenlaengeMm = 30, ruhezone = RUHEZONE } = {},
+): string {
+  const { kante, pfad } = qrBildErzeugen(text, ruhezone)
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     `<svg xmlns="http://www.w3.org/2000/svg" width="${kantenlaengeMm}mm" height="${kantenlaengeMm}mm" viewBox="0 0 ${kante} ${kante}" shape-rendering="crispEdges">`,

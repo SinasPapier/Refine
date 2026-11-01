@@ -353,8 +353,8 @@ function Einstellungen({
             </tbody>
           </table>
           <p className="muted small">
-            Beispiel: Präfix <code>RE-</code>, „Mit Jahr" an und 4 Stellen ergibt{' '}
-            <code>RE-2026-0001</code>. Der Zähler ist die zuletzt vergebene Nummer –
+            Beispiel: Präfix <code>R-</code>, „Mit Jahr" an und 4 Stellen ergibt{' '}
+            <code>R-2026-0001</code>. Der Zähler ist die zuletzt vergebene Nummer –
             die nächste erzeugte ist um eins höher.
           </p>
         </div>
